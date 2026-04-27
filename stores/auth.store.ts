@@ -25,6 +25,7 @@ export const useAuthStore = create<AuthState>()(
       },
       logout: () => {
         localStorage.removeItem('access_token');
+        localStorage.removeItem('auth-storage');
         document.cookie = 'auth_token=; path=/; max-age=0';
         set({ token: null, user: null, isAuthenticated: false });
       },

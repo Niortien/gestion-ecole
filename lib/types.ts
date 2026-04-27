@@ -149,6 +149,7 @@ export interface Parent {
   telephoneUrgence?: string;
   profession?: string;
   adresse?: string;
+  eleves?: Eleve[];
   createdAt: string;
   updatedAt: string;
 }

@@ -1,15 +1,19 @@
 'use client';
 
+import { useState } from 'react';
 import { type ColumnDef } from '@tanstack/react-table';
 import { CalendarCheck } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable } from '@/components/common/DataTable';
-import { usePresencesByClasse } from '@/features/presences';
-import type { Presence } from '@/lib/types';
-import { StatutPresence } from '@/lib/types';
+import { usePresencesByClasse, usePresencesByEleve } from '@/features/presences';
+import { useMonProfilParent } from '@/features/parents';
+import { useEleves } from '@/features/eleves';
+import { useAuthStore } from '@/stores/auth.store';
+import { UserRole, type Presence, StatutPresence } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 const STATUT_COLORS: Record<StatutPresence, string> = {
@@ -20,7 +24,19 @@ const STATUT_COLORS: Record<StatutPresence, string> = {
 };
 
 export default function PresencesPage() {
-  const { data: presences, isLoading } = usePresencesByClasse(0);
+  const { user } = useAuthStore();
+  const isParent = user?.role === UserRole.PARENT;
+
+  const [selectedEleveId, setSelectedEleveId] = useState<number | undefined>();
+
+  const { data: parentProfil } = useMonProfilParent();
+  const { data: mesEnfants } = useEleves({ parentId: parentProfil?.id });
+
+  const { data: presencesAdmin, isLoading: loadingAdmin } = usePresencesByClasse(isParent ? 0 : 0);
+  const { data: presencesEleve, isLoading: loadingEleve } = usePresencesByEleve(selectedEleveId ?? 0);
+
+  const presences = isParent ? (presencesEleve ?? []) : (presencesAdmin ?? []);
+  const isLoading = isParent ? loadingEleve : loadingAdmin;
 
   const columns: ColumnDef<Presence>[] = [
     {
@@ -64,13 +80,34 @@ export default function PresencesPage() {
   ];
 
   return (
-    <div>
+    <div className="space-y-4">
       <PageHeader
         title="Présences"
-        description="Suivi des présences des élèves"
+        description={isParent ? 'Suivi des présences de vos enfants' : 'Suivi des présences des élèves'}
         icon={CalendarCheck}
       />
-      <DataTable columns={columns} data={presences ?? []} isLoading={isLoading} searchPlaceholder="Rechercher..." />
+      {isParent && mesEnfants && mesEnfants.length > 0 && (
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">Enfant :</span>
+          <Select
+            value={selectedEleveId?.toString() ?? ''}
+            onValueChange={(v) => setSelectedEleveId(Number(v))}
+          >
+            <SelectTrigger className="w-56">
+              <SelectValue placeholder="Sélectionner un enfant" />
+            </SelectTrigger>
+            <SelectContent>
+              {mesEnfants.map((e) => (
+                <SelectItem key={e.id} value={e.id.toString()}>
+                  {e.prenom} {e.nom}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      <DataTable columns={columns} data={presences} isLoading={isLoading} searchPlaceholder="Rechercher..." />
     </div>
   );
 }
+

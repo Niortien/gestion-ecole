@@ -1,7 +1,8 @@
 'use client';
 
-import { Sun, Moon, Bell, Search } from 'lucide-react';
+import { Sun, Moon, Bell, Search, LogOut } from 'lucide-react';
 import { useTheme } from 'next-themes';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -12,14 +13,21 @@ import {
 import { BreadcrumbNav } from './BreadcrumbNav';
 import { AnneeScolaireSelector } from './AnneeScolaireSelector';
 import { useAppStore } from '@/stores/app.store';
+import { useAuthStore } from '@/stores/auth.store';
 import { useUnreadCount } from '@/features/messagerie';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 export function Topbar() {
   const { theme, setTheme } = useTheme();
+  const router = useRouter();
   const { sidebarCollapsed, hasUnsavedChanges } = useAppStore();
+  const { logout } = useAuthStore();
   const { data: unreadCount } = useUnreadCount();
+
+  const handleLogout = () => {
+    logout();
+    router.replace('/login');
+  };
 
   return (
     <header
@@ -88,6 +96,16 @@ export function Topbar() {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Logout */}
+      <button
+        onClick={handleLogout}
+        title="Déconnexion"
+        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-500 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 transition-colors"
+      >
+        <LogOut className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Déconnexion</span>
+      </button>
     </header>
   );
 }

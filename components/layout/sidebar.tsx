@@ -68,8 +68,8 @@ const NAV_SECTIONS: NavSection[] = [
     title: 'Établissement',
     items: [
       { label: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
-      { label: 'Années scolaires', href: '/annee-scolaire', icon: CalendarRange },
-      { label: 'Classes', href: '/classes', icon: School },
+      { label: 'Années scolaires', href: '/annee-scolaire', icon: CalendarRange, roles: [UserRole.ADMIN, UserRole.DIRECTEUR] },
+      { label: 'Classes', href: '/classes', icon: School, roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.MAITRE] },
     ],
   },
   {
@@ -139,7 +139,7 @@ export function Sidebar() {
 
   const handleLogout = () => {
     logout();
-    router.push('/login');
+    router.replace('/login');
   };
 
   const initials = user ? user.email.charAt(0).toUpperCase() : 'U';
@@ -197,7 +197,7 @@ export function Sidebar() {
                 </p>
               )}
               {sidebarCollapsed && <div className="my-2 border-t border-white/8" />}
-              {section.items.map((item) => {
+              {section.items.filter((item) => !item.roles || !role || item.roles.includes(role)).map((item) => {
                 const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 const NavLink = (
                   <Link
@@ -244,8 +244,8 @@ export function Sidebar() {
       </ScrollArea>
 
       {/* Footer */}
-      <div className="border-t border-white/8 p-3">
-        <div className={cn('flex items-center gap-2.5', sidebarCollapsed && 'flex-col gap-2')}>
+      <div className="shrink-0 border-t border-white/8 p-3">
+        <div className={cn('flex items-center gap-2', sidebarCollapsed && 'flex-col')}>
           <Avatar className="h-8 w-8 shrink-0 ring-2 ring-white/10">
             <AvatarFallback className="bg-linear-to-br from-indigo-500 to-violet-600 text-white text-xs font-bold">
               {initials}
@@ -259,19 +259,18 @@ export function Sidebar() {
               </span>
             </div>
           )}
-          <Tooltip>
-            <TooltipTrigger render={
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleLogout}
-                className="h-7 w-7 shrink-0 rounded-lg text-white/40 hover:bg-rose-500/15 hover:text-rose-400"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-              </Button>
-            } />
-            <TooltipContent side={sidebarCollapsed ? 'right' : 'top'} className="text-xs">Déconnexion</TooltipContent>
-          </Tooltip>
+          <button
+            onClick={handleLogout}
+            title="Déconnexion"
+            className={cn(
+              'shrink-0 flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors',
+              'text-rose-400 hover:bg-rose-500/20 hover:text-rose-300',
+              sidebarCollapsed && 'px-1.5',
+            )}
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            {!sidebarCollapsed && <span>Déconnexion</span>}
+          </button>
         </div>
       </div>
     </aside>

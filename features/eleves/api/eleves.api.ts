@@ -4,6 +4,7 @@ import type { CreateEleveFormValues, UpdateEleveFormValues } from '../schema/ele
 
 export interface EleveFilters {
   classeId?: number;
+  parentId?: number;
   statut?: string;
   search?: string;
   anneeScolaireId?: number;

@@ -40,8 +40,15 @@ function LoginForm() {
       login(data.access_token, data.user);
       router.replace(from);
     },
-    onError: () => {
-      toast.error('Identifiants incorrects. Vérifiez votre email et mot de passe.');
+    onError: (error: unknown) => {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 401 || status === 403) {
+        toast.error('Identifiants incorrects.');
+      } else if (!status) {
+        toast.error('Impossible de contacter le serveur. Vérifiez que le backend est démarré.');
+      } else {
+        toast.error(`Erreur ${status}. Réessayez.`);
+      }
     },
   });
 
