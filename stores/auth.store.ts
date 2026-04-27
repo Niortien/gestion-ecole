@@ -19,14 +19,12 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       isAuthenticated: false,
       login: (token, user) => {
-        localStorage.setItem('auth_token', token);
-        // Also set a cookie so the server-side middleware can verify auth
+        localStorage.setItem('access_token', token);
         document.cookie = `auth_token=${token}; path=/; SameSite=Strict; max-age=${60 * 60 * 24 * 7}`;
         set({ token, user, isAuthenticated: true });
       },
       logout: () => {
-        localStorage.removeItem('auth_token');
-        // Clear the middleware cookie too
+        localStorage.removeItem('access_token');
         document.cookie = 'auth_token=; path=/; max-age=0';
         set({ token: null, user: null, isAuthenticated: false });
       },

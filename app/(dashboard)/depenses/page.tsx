@@ -1,80 +1,82 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { type ColumnDef } from '@tanstack/react-table';
-import { IconPlus, IconPencil, IconTrash } from '@tabler/icons-react';
+import { Plus, TrendingDown, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { depensesApi, type CreateDepenseDto } from '@/lib/api/depenses';
-import type { Depense } from '@/lib/types';
-import { CategorieDepense } from '@/lib/types';
-import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { PageHeader } from '@/components/ui/page-header';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { CategorieDepenseBadge } from '@/components/ui/status-badge';
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable } from '@/components/common/DataTable';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useDepenses, useDeleteDepense, useCreateDepense } from '@/features/depenses';
+import type { Depense } from '@/lib/types';
+import { CategorieDepense } from '@/lib/types';
 
-const EMPTY: CreateDepenseDto = { libelle: '', montant: 0, categorie: CategorieDepense.AUTRE, date: '' };
-
-const CATS: { value: CategorieDepense; label: string }[] = [
-  { value: CategorieDepense.SALAIRE, label: 'Salaire' },
-  { value: CategorieDepense.FOURNITURES, label: 'Fournitures' },
-  { value: CategorieDepense.MAINTENANCE, label: 'Maintenance' },
-  { value: CategorieDepense.EAU_ELECTRICITE, label: 'Eau / Électricité' },
-  { value: CategorieDepense.COMMUNICATION, label: 'Communication' },
-  { value: CategorieDepense.AUTRE, label: 'Autre' },
-];
+const createDepenseSchema = z.object({
+  libelle: z.string().min(1, 'Libellé requis'),
+  montant: z.number().positive('Montant invalide'),
+  categorie: z.nativeEnum(CategorieDepense),
+  date: z.string().min(1, 'Date requise'),
+  description: z.string().optional(),
+});
+type CreateDepenseFormValues = z.infer<typeof createDepenseSchema>;
 
 export default function DepensesPage() {
-  const qc = useQueryClient();
-  const [formOpen, setFormOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editing, setEditing] = useState<Depense | null>(null);
-  const [form, setForm] = useState<CreateDepenseDto>(EMPTY);
-  const [deleteTarget, setDeleteTarget] = useState<Depense | null>(null);
+  const { data: depenses, isLoading } = useDepenses();
+  const deleteDepense = useDeleteDepense();
+  const createDepense = useCreateDepense();
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const { data: depenses = [], isLoading } = useQuery({ queryKey: ['depenses'], queryFn: () => depensesApi.list({}) });
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateDepenseFormValues>({
+    resolver: zodResolver(createDepenseSchema),
+  });
 
-  const createMutation = useMutation({ mutationFn: (dto: CreateDepenseDto) => depensesApi.create(dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['depenses'] }); setFormOpen(false); } });
-  const updateMutation = useMutation({ mutationFn: ({ id, dto }: { id: number; dto: Partial<CreateDepenseDto> }) => depensesApi.update(id, dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['depenses'] }); setFormOpen(false); } });
-  const deleteMutation = useMutation({ mutationFn: (id: number) => depensesApi.delete(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['depenses'] }); setDeleteOpen(false); } });
-
-  const openCreate = () => { setEditing(null); setForm({ ...EMPTY, date: format(new Date(), 'yyyy-MM-dd') }); setFormOpen(true); };
-  const openEdit = (d: Depense) => {
-    setEditing(d);
-    setForm({ libelle: d.libelle, montant: d.montant, categorie: d.categorie, date: d.date?.slice(0, 10) ?? '', description: d.description ?? '' });
-    setFormOpen(true);
-  };
-  const handleSubmit = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (editing) updateMutation.mutate({ id: editing.id, dto: form });
-    else createMutation.mutate(form);
+  const onSubmit = (data: CreateDepenseFormValues) => {
+    createDepense.mutate(data, { onSuccess: () => { reset(); setShowCreate(false); } });
   };
 
-  const fmtAmount = (v: number) => new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 }).format(v);
-  const fmtDate = (v: unknown) => { try { return format(new Date(v as string), 'dd/MM/yyyy', { locale: fr }); } catch { return '—'; } };
-
-  const totalDepenses = depenses.reduce((sum, d) => sum + (d.montant ?? 0), 0);
-
-  const columns: ColumnDef<Depense, unknown>[] = [
-    { accessorKey: 'libelle', header: 'Libellé', enableSorting: true },
-    { accessorKey: 'montant', header: 'Montant', cell: ({ getValue }) => <span className="font-semibold">{fmtAmount(getValue() as number)}</span> },
-    { accessorKey: 'categorie', header: 'Catégorie', cell: ({ row }) => <CategorieDepenseBadge categorie={row.original.categorie} /> },
-    { accessorKey: 'date', header: 'Date', cell: ({ getValue }) => fmtDate(getValue()), enableSorting: true },
-    { accessorKey: 'description', header: 'Description', cell: ({ getValue }) => <span className="text-[hsl(var(--muted-foreground))] text-xs">{(getValue() as string) || '—'}</span> },
+  const columns: ColumnDef<Depense>[] = [
+    { accessorKey: 'libelle', header: 'Libellé', cell: ({ getValue }) => <span className="font-medium">{getValue() as string}</span> },
     {
-      id: 'actions', header: '',
+      accessorKey: 'montant',
+      header: 'Montant (FCFA)',
+      cell: ({ getValue }) => <span className="font-mono">{(getValue() as number).toLocaleString('fr-FR')}</span>,
+    },
+    {
+      accessorKey: 'categorie',
+      header: 'Catégorie',
+      cell: ({ getValue }) => (
+        <Badge variant="outline" className="text-xs">{(getValue() as string | undefined) ?? '—'}</Badge>
+      ),
+    },
+    {
+      accessorKey: 'date',
+      header: 'Date',
+      cell: ({ getValue }) => {
+        const val = getValue() as string;
+        return val ? format(new Date(val), 'dd MMM yyyy', { locale: fr }) : '—';
+      },
+    },
+    { accessorKey: 'description', header: 'Description', cell: ({ getValue }) => (getValue() as string | undefined) ?? '—' },
+    {
+      id: 'actions',
       cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Modifier" onClick={() => openEdit(row.original)}><IconPencil size={14} /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-[hsl(var(--destructive))]" aria-label="Supprimer" onClick={() => { setDeleteTarget(row.original); setDeleteOpen(true); }}><IconTrash size={14} /></Button>
-        </div>
+        <Button
+          variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+          onClick={() => setDeleteId(row.original.id)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
       ),
     },
   ];
@@ -83,34 +85,60 @@ export default function DepensesPage() {
     <div>
       <PageHeader
         title="Dépenses"
-        description="Enregistrement et suivi des dépenses de l'école"
-        action={<Button onClick={openCreate} size="sm"><IconPlus size={16} />Ajouter une dépense</Button>}
+        description="Suivi des dépenses de l'établissement"
+        icon={TrendingDown}
+        actions={<Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" />Nouvelle dépense</Button>}
       />
-
-      {/* Summary card */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4">
-          <p className="text-xs text-[hsl(var(--muted-foreground))] uppercase tracking-wide font-medium">Total des dépenses</p>
-          <p className="text-2xl font-bold text-red-600 mt-1">{fmtAmount(totalDepenses)}</p>
-        </div>
-      </div>
-
-      <DataTable data={depenses} columns={columns} isLoading={isLoading} searchPlaceholder="Rechercher une dépense…" />
-
-      <FormDialog open={formOpen} onOpenChange={setFormOpen} title={editing ? 'Modifier la dépense' : 'Ajouter une dépense'} onSubmit={handleSubmit} loading={createMutation.isPending || updateMutation.isPending}>
-        <div className="space-y-1"><Label htmlFor="depLib">Libellé *</Label><Input id="depLib" value={form.libelle} onChange={(e) => setForm({ ...form, libelle: e.target.value })} required /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="depMontant">Montant (FCFA) *</Label><Input id="depMontant" type="number" min={0} value={form.montant} onChange={(e) => setForm({ ...form, montant: Number(e.target.value) })} required /></div>
-          <div className="space-y-1"><Label htmlFor="depDate">Date *</Label><Input id="depDate" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required /></div>
-        </div>
-        <div className="space-y-1"><Label htmlFor="depCat">Catégorie *</Label>
-          <Select id="depCat" value={form.categorie} onChange={(e) => setForm({ ...form, categorie: e.target.value as CategorieDepense })}>
-            {CATS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </Select></div>
-        <div className="space-y-1"><Label htmlFor="depDesc">Description</Label><Textarea id="depDesc" value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} /></div>
-      </FormDialog>
-
-      <ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="Supprimer cette dépense ?" description={deleteTarget?.libelle} onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)} loading={deleteMutation.isPending} confirmLabel="Supprimer" />
+      <DataTable columns={columns} data={depenses ?? []} isLoading={isLoading} searchPlaceholder="Rechercher une dépense..." />
+      <ConfirmDialog
+        open={deleteId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
+        title="Supprimer la dépense ?"
+        description="Cette action est irréversible."
+        confirmLabel="Supprimer"
+        onConfirm={() => { if (deleteId) deleteDepense.mutate(deleteId, { onSuccess: () => setDeleteId(null) }); }}
+        isLoading={deleteDepense.isPending}
+      />
+      <Dialog open={showCreate} onOpenChange={(open) => setShowCreate(open)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><h2 className="text-lg font-semibold">Nouvelle dépense</h2></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Libellé</Label>
+              <Input {...register('libelle')} placeholder="Achat fournitures" />
+              {errors.libelle && <p className="text-xs text-destructive">{errors.libelle.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Montant (FCFA)</Label>
+              <Input type="number" min={0} {...register('montant', { valueAsNumber: true })} placeholder="50000" />
+              {errors.montant && <p className="text-xs text-destructive">{errors.montant.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Catégorie</Label>
+              <select {...register('categorie')} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                <option value="">Sélectionner une catégorie</option>
+                {Object.values(CategorieDepense).map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+              </select>
+              {errors.categorie && <p className="text-xs text-destructive">{errors.categorie.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Date</Label>
+              <Input type="date" {...register('date')} />
+              {errors.date && <p className="text-xs text-destructive">{errors.date.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Description (optionnel)</Label>
+              <Textarea {...register('description')} placeholder="Détails..." rows={2} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { reset(); setShowCreate(false); }}>Annuler</Button>
+              <Button type="submit" disabled={createDepense.isPending}>
+                {createDepense.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Enregistrer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

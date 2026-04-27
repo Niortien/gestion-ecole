@@ -1,69 +1,89 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { type ColumnDef } from '@tanstack/react-table';
-import { IconPlus, IconPencil, IconTrash } from '@tabler/icons-react';
-import { fraisScolariteApi, type CreateFraisScolariteDto } from '@/lib/api/frais-scolarite';
-import { classesApi } from '@/lib/api/classes';
-import { anneesScolairesApi } from '@/lib/api/annees-scolaires';
-import type { FraisScolarite } from '@/lib/types';
-import { DataTable } from '@/components/ui/data-table';
+import { Plus, Receipt, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { PageHeader } from '@/components/ui/page-header';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable } from '@/components/common/DataTable';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useFraisScolarite, useDeleteFraisScolarite, useCreateFraisScolarite } from '@/features/frais-scolarite';
+import { useClasses } from '@/features/classes';
+import { useAnneesScolaires } from '@/features/annees-scolaires';
+import type { FraisScolarite } from '@/lib/types';
 
-const EMPTY: CreateFraisScolariteDto = { libelle: '', montant: 0, anneeScolaireId: 0, obligatoire: true };
+const createFraisSchema = z.object({
+  libelle: z.string().min(1, 'Libellé requis'),
+  montant: z.number().positive('Montant invalide'),
+  classeId: z.number().optional(),
+  anneeScolaireId: z.number().positive('Année scolaire requise'),
+  obligatoire: z.boolean().optional(),
+  description: z.string().optional(),
+});
+type CreateFraisFormValues = z.infer<typeof createFraisSchema>;
 
 export default function FraisScolaritePage() {
-  const qc = useQueryClient();
-  const [formOpen, setFormOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editing, setEditing] = useState<FraisScolarite | null>(null);
-  const [form, setForm] = useState<CreateFraisScolariteDto>(EMPTY);
-  const [deleteTarget, setDeleteTarget] = useState<FraisScolarite | null>(null);
+  const { data: frais, isLoading } = useFraisScolarite();
+  const deleteFrais = useDeleteFraisScolarite();
+  const createFrais = useCreateFraisScolarite();
+  const { data: classes } = useClasses();
+  const { data: annees } = useAnneesScolaires();
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const { data: anneeActive } = useQuery({ queryKey: ['annees-scolaires', 'active'], queryFn: anneesScolairesApi.active });
-  const { data: classes = [] } = useQuery({ queryKey: ['classes', anneeActive?.id], queryFn: () => classesApi.list({ anneeScolaireId: anneeActive?.id }), enabled: !!anneeActive });
-  const { data: frais = [], isLoading } = useQuery({ queryKey: ['frais-scolarite', anneeActive?.id], queryFn: () => fraisScolariteApi.list({ anneeScolaireId: anneeActive?.id }), enabled: !!anneeActive });
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateFraisFormValues>({
+    resolver: zodResolver(createFraisSchema),
+  });
 
-  const createMutation = useMutation({ mutationFn: (dto: CreateFraisScolariteDto) => fraisScolariteApi.create(dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['frais-scolarite'] }); setFormOpen(false); } });
-  const updateMutation = useMutation({ mutationFn: ({ id, dto }: { id: number; dto: Partial<CreateFraisScolariteDto> }) => fraisScolariteApi.update(id, dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['frais-scolarite'] }); setFormOpen(false); } });
-  const deleteMutation = useMutation({ mutationFn: (id: number) => fraisScolariteApi.delete(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['frais-scolarite'] }); setDeleteOpen(false); } });
-
-  const openCreate = () => { setEditing(null); setForm({ ...EMPTY, anneeScolaireId: anneeActive?.id ?? 0 }); setFormOpen(true); };
-  const openEdit = (f: FraisScolarite) => {
-    setEditing(f);
-    setForm({ libelle: f.libelle, montant: f.montant, anneeScolaireId: f.anneeScolaire?.id ?? 0, classeId: f.classe?.id, obligatoire: f.obligatoire });
-    setFormOpen(true);
-  };
-  const handleSubmit = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (editing) updateMutation.mutate({ id: editing.id, dto: form });
-    else createMutation.mutate(form);
+  const onSubmit = (data: CreateFraisFormValues) => {
+    createFrais.mutate(data, { onSuccess: () => { reset(); setShowCreate(false); } });
   };
 
-  const fmtAmount = (v: number) => new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 }).format(v);
-
-  const columns: ColumnDef<FraisScolarite, unknown>[] = [
-    { accessorKey: 'libelle', header: 'Libellé', enableSorting: true },
-    { accessorKey: 'montant', header: 'Montant', cell: ({ getValue }) => <span className="font-semibold">{fmtAmount(getValue() as number)}</span> },
-    { id: 'classe', header: 'Classe', accessorFn: (r) => r.classe?.nom ?? 'Toutes les classes', cell: ({ getValue }) => <span className="text-sm">{getValue() as string}</span> },
+  const columns: ColumnDef<FraisScolarite>[] = [
+    { accessorKey: 'libelle', header: 'Libellé', cell: ({ getValue }) => <span className="font-medium">{getValue() as string}</span> },
     {
-      accessorKey: 'obligatoire', header: 'Obligatoire',
-      cell: ({ getValue }) => getValue() ? <Badge variant="success">Obligatoire</Badge> : <Badge variant="secondary">Facultatif</Badge>,
+      accessorKey: 'montant',
+      header: 'Montant (FCFA)',
+      cell: ({ getValue }) => <span className="font-mono">{(getValue() as number).toLocaleString('fr-FR')}</span>,
     },
     {
-      id: 'actions', header: '',
+      id: 'classe',
+      header: 'Classe',
+      cell: ({ row }) => row.original.classe ? (row.original.classe.libelle ?? row.original.classe.nom) : 'Toutes',
+    },
+    {
+      id: 'annee',
+      header: 'Année scolaire',
+      cell: ({ row }) => row.original.anneeScolaire?.libelle ?? '—',
+    },
+    {
+      accessorKey: 'obligatoire',
+      header: 'Obligatoire',
+      cell: ({ getValue }) => (
+        <Badge variant={(getValue() as boolean) ? 'default' : 'secondary'} className="text-xs">
+          {(getValue() as boolean) ? 'Oui' : 'Non'}
+        </Badge>
+      ),
+    },
+    {
+      id: 'actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Modifier" onClick={() => openEdit(row.original)}><IconPencil size={14} /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-[hsl(var(--destructive))]" aria-label="Supprimer" onClick={() => { setDeleteTarget(row.original); setDeleteOpen(true); }}><IconTrash size={14} /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button>
+          <Button
+            variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+            onClick={() => setDeleteId(row.original.id)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         </div>
       ),
     },
@@ -71,23 +91,70 @@ export default function FraisScolaritePage() {
 
   return (
     <div>
-      <PageHeader title="Frais de scolarité" description="Gestion des types de frais scolaires" action={<Button onClick={openCreate} size="sm" disabled={!anneeActive}><IconPlus size={16} />Ajouter des frais</Button>} />
-      <DataTable data={frais} columns={columns} isLoading={isLoading} searchPlaceholder="Rechercher…" />
-
-      <FormDialog open={formOpen} onOpenChange={setFormOpen} title={editing ? 'Modifier les frais' : 'Ajouter des frais'} onSubmit={handleSubmit} loading={createMutation.isPending || updateMutation.isPending}>
-        <div className="space-y-1"><Label htmlFor="fsLib">Libellé *</Label><Input id="fsLib" value={form.libelle} onChange={(e) => setForm({ ...form, libelle: e.target.value })} required /></div>
-        <div className="space-y-1"><Label htmlFor="fsMontant">Montant (FCFA) *</Label><Input id="fsMontant" type="number" min={0} value={form.montant} onChange={(e) => setForm({ ...form, montant: Number(e.target.value) })} required /></div>
-        <div className="space-y-1"><Label htmlFor="fsClasse">Classe (laisser vide = toutes)</Label>
-          <Select id="fsClasse" value={form.classeId?.toString() ?? ''} onChange={(e) => setForm({ ...form, classeId: e.target.value ? Number(e.target.value) : undefined })} placeholder="— Toutes les classes —">
-            {classes.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
-          </Select></div>
-        <div className="flex items-center gap-2">
-          <input id="fsOblig" type="checkbox" checked={form.obligatoire} onChange={(e) => setForm({ ...form, obligatoire: e.target.checked })} className="h-4 w-4 rounded border-[hsl(var(--input))]" />
-          <Label htmlFor="fsOblig">Obligatoire</Label>
-        </div>
-      </FormDialog>
-
-      <ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="Supprimer ces frais ?" description={deleteTarget?.libelle} onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)} loading={deleteMutation.isPending} confirmLabel="Supprimer" />
+      <PageHeader
+        title="Frais de scolarité"
+        description="Configuration des frais de scolarité"
+        icon={Receipt}
+        actions={<Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" />Nouveau frais</Button>}
+      />
+      <DataTable columns={columns} data={frais ?? []} isLoading={isLoading} searchPlaceholder="Rechercher..." />
+      <ConfirmDialog
+        open={deleteId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
+        title="Supprimer le frais ?"
+        description="Cette action est irréversible."
+        confirmLabel="Supprimer"
+        onConfirm={() => { if (deleteId) deleteFrais.mutate(deleteId, { onSuccess: () => setDeleteId(null) }); }}
+        isLoading={deleteFrais.isPending}
+      />
+      <Dialog open={showCreate} onOpenChange={(open) => setShowCreate(open)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><h2 className="text-lg font-semibold">Nouveau frais de scolarité</h2></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Libellé</Label>
+              <Input {...register('libelle')} placeholder="Frais de scolarité 2024-2025" />
+              {errors.libelle && <p className="text-xs text-destructive">{errors.libelle.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Montant (FCFA)</Label>
+              <Input type="number" min={0} {...register('montant', { valueAsNumber: true })} placeholder="150000" />
+              {errors.montant && <p className="text-xs text-destructive">{errors.montant.message}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Année scolaire</Label>
+                <select {...register('anneeScolaireId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {annees?.map((a) => <option key={a.id} value={a.id}>{a.libelle}</option>)}
+                </select>
+                {errors.anneeScolaireId && <p className="text-xs text-destructive">{errors.anneeScolaireId.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Classe (optionnel)</Label>
+                <select {...register('classeId', { setValueAs: (v) => v === '' ? undefined : parseInt(v) })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Toutes classes</option>
+                  {classes?.map((c) => <option key={c.id} value={c.id}>{c.libelle ?? c.nom}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="obligatoire" {...register('obligatoire')} className="rounded" />
+              <Label htmlFor="obligatoire">Frais obligatoire</Label>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Description (optionnel)</Label>
+              <Textarea {...register('description')} placeholder="Détails..." rows={2} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { reset(); setShowCreate(false); }}>Annuler</Button>
+              <Button type="submit" disabled={createFrais.isPending}>
+                {createFrais.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Créer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

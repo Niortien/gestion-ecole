@@ -1,72 +1,64 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { type ColumnDef } from '@tanstack/react-table';
-import { IconPlus, IconPencil, IconTrash } from '@tabler/icons-react';
+import { Plus, BookMarked, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { devoirsApi, type CreateDevoirDto } from '@/lib/api/devoirs';
-import { classesApi } from '@/lib/api/classes';
-import { matieresApi } from '@/lib/api/matieres';
-import { anneesScolairesApi } from '@/lib/api/annees-scolaires';
-import type { Devoir } from '@/lib/types';
-import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { PageHeader } from '@/components/ui/page-header';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-
-const EMPTY: CreateDevoirDto = { titre: '', matiereId: 0, classeId: 0, dateDonnee: '' };
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable } from '@/components/common/DataTable';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useDevoirs, useDeleteDevoir, useCreateDevoir, createDevoirSchema } from '@/features/devoirs';
+import type { CreateDevoirFormValues } from '@/features/devoirs';
+import { useClasses } from '@/features/classes';
+import { useMatieres } from '@/features/matieres';
+import type { Devoir } from '@/lib/types';
 
 export default function DevoirsPage() {
-  const qc = useQueryClient();
-  const [formOpen, setFormOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editing, setEditing] = useState<Devoir | null>(null);
-  const [form, setForm] = useState<CreateDevoirDto>(EMPTY);
-  const [deleteTarget, setDeleteTarget] = useState<Devoir | null>(null);
-  const [classeFilter, setClasseFilter] = useState('');
+  const { data: devoirs, isLoading } = useDevoirs(0);
+  const deleteDevoir = useDeleteDevoir();
+  const createDevoir = useCreateDevoir();
+  const { data: classes } = useClasses();
+  const { data: matieres } = useMatieres();
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const { data: anneeActive } = useQuery({ queryKey: ['annees-scolaires', 'active'], queryFn: anneesScolairesApi.active });
-  const { data: classes = [] } = useQuery({ queryKey: ['classes', anneeActive?.id], queryFn: () => classesApi.list({ anneeScolaireId: anneeActive?.id }), enabled: !!anneeActive });
-  const { data: matieres = [] } = useQuery({ queryKey: ['matieres'], queryFn: matieresApi.list });
-  const { data: devoirs = [], isLoading } = useQuery({ queryKey: ['devoirs', classeFilter], queryFn: () => devoirsApi.byClasse(Number(classeFilter)), enabled: !!classeFilter });
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateDevoirFormValues>({
+    resolver: zodResolver(createDevoirSchema),
+  });
 
-  const createMutation = useMutation({ mutationFn: (dto: CreateDevoirDto) => devoirsApi.create(dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['devoirs'] }); setFormOpen(false); } });
-  const updateMutation = useMutation({ mutationFn: ({ id, dto }: { id: number; dto: Partial<CreateDevoirDto> }) => devoirsApi.update(id, dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['devoirs'] }); setFormOpen(false); } });
-  const deleteMutation = useMutation({ mutationFn: (id: number) => devoirsApi.delete(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['devoirs'] }); setDeleteOpen(false); } });
-
-  const openCreate = () => { setEditing(null); setForm({ ...EMPTY, classeId: Number(classeFilter) || 0 }); setFormOpen(true); };
-  const openEdit = (d: Devoir) => {
-    setEditing(d);
-    setForm({ titre: d.titre, description: d.description ?? '', matiereId: d.matiere?.id ?? 0, classeId: d.classe?.id ?? 0, dateDonnee: d.dateDonnee?.slice(0, 10) ?? '', dateRendu: d.dateRendu?.slice(0, 10) ?? '' });
-    setFormOpen(true);
-  };
-  const handleSubmit = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (editing) updateMutation.mutate({ id: editing.id, dto: form });
-    else createMutation.mutate(form);
+  const onSubmit = (data: CreateDevoirFormValues) => {
+    createDevoir.mutate(data, { onSuccess: () => { reset(); setShowCreate(false); } });
   };
 
-  const fmtDate = (v: unknown) => { try { return v ? format(new Date(v as string), 'dd/MM/yyyy', { locale: fr }) : '—'; } catch { return '—'; } };
-
-  const columns: ColumnDef<Devoir, unknown>[] = [
-    { accessorKey: 'titre', header: 'Titre', enableSorting: true },
-    { id: 'matiere', header: 'Matière', accessorFn: (r) => r.matiere?.nom ?? '—' },
-    { id: 'classe', header: 'Classe', accessorFn: (r) => r.classe?.nom ?? '—' },
-    { accessorKey: 'dateDonnee', header: 'Donné le', cell: ({ getValue }) => fmtDate(getValue()) },
-    { accessorKey: 'dateRendu', header: 'Rendu le', cell: ({ getValue }) => fmtDate(getValue()) },
+  const columns: ColumnDef<Devoir>[] = [
+    { accessorKey: 'titre', header: 'Titre', cell: ({ getValue }) => <span className="font-medium">{getValue() as string}</span> },
+    { id: 'matiere', header: 'Matière', cell: ({ row }) => row.original.matiere?.nom ?? '—' },
+    { id: 'classe', header: 'Classe', cell: ({ row }) => row.original.classe?.libelle ?? row.original.classe?.nom ?? '—' },
     {
-      id: 'actions', header: '',
+      accessorKey: 'dateRemise',
+      header: 'Date de remise',
+      cell: ({ getValue }) => {
+        const val = getValue() as string | undefined;
+        return val ? format(new Date(val), 'dd MMM yyyy', { locale: fr }) : '—';
+      },
+    },
+    { accessorKey: 'description', header: 'Description', cell: ({ getValue }) => (getValue() as string | undefined) ?? '—' },
+    {
+      id: 'actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Modifier" onClick={() => openEdit(row.original)}><IconPencil size={14} /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-[hsl(var(--destructive))]" aria-label="Supprimer" onClick={() => { setDeleteTarget(row.original); setDeleteOpen(true); }}><IconTrash size={14} /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteId(row.original.id)}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         </div>
       ),
     },
@@ -74,37 +66,73 @@ export default function DevoirsPage() {
 
   return (
     <div>
-      <PageHeader title="Devoirs" description="Gestion des devoirs à domicile" action={<Button onClick={openCreate} size="sm" disabled={!classeFilter}><IconPlus size={16} />Ajouter un devoir</Button>} />
-
-      <div className="flex items-end gap-3 mb-6 p-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))]">
-        <div className="space-y-1"><Label htmlFor="devClasse">Classe</Label>
-          <Select id="devClasse" value={classeFilter} onChange={(e) => setClasseFilter(e.target.value)} placeholder="— Sélectionner —">
-            {classes.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
-          </Select></div>
-      </div>
-
-      {classeFilter && <DataTable data={devoirs} columns={columns} isLoading={isLoading} searchPlaceholder="Rechercher un devoir…" />}
-
-      <FormDialog open={formOpen} onOpenChange={setFormOpen} title={editing ? 'Modifier le devoir' : 'Ajouter un devoir'} onSubmit={handleSubmit} loading={createMutation.isPending || updateMutation.isPending}>
-        <div className="space-y-1"><Label htmlFor="dvTitre">Titre *</Label><Input id="dvTitre" value={form.titre} onChange={(e) => setForm({ ...form, titre: e.target.value })} required /></div>
-        <div className="space-y-1"><Label htmlFor="dvDesc">Description</Label><Textarea id="dvDesc" value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="dvClasse">Classe *</Label>
-            <Select id="dvClasse" value={form.classeId?.toString() ?? ''} onChange={(e) => setForm({ ...form, classeId: Number(e.target.value) })} placeholder="— Sélectionner —">
-              {classes.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
-            </Select></div>
-          <div className="space-y-1"><Label htmlFor="dvMatiere">Matière *</Label>
-            <Select id="dvMatiere" value={form.matiereId?.toString() ?? ''} onChange={(e) => setForm({ ...form, matiereId: Number(e.target.value) })} placeholder="— Sélectionner —">
-              {matieres.map((m) => <option key={m.id} value={m.id}>{m.nom}</option>)}
-            </Select></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="dvDonne">Date donnée *</Label><Input id="dvDonne" type="date" value={form.dateDonnee} onChange={(e) => setForm({ ...form, dateDonnee: e.target.value })} required /></div>
-          <div className="space-y-1"><Label htmlFor="dvRendu">Date rendu</Label><Input id="dvRendu" type="date" value={form.dateRendu ?? ''} onChange={(e) => setForm({ ...form, dateRendu: e.target.value })} /></div>
-        </div>
-      </FormDialog>
-
-      <ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="Supprimer ce devoir ?" description={deleteTarget?.titre} onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)} loading={deleteMutation.isPending} confirmLabel="Supprimer" />
+      <PageHeader
+        title="Devoirs"
+        description="Gestion des devoirs à faire"
+        icon={BookMarked}
+        actions={<Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" />Nouveau devoir</Button>}
+      />
+      <DataTable columns={columns} data={devoirs ?? []} isLoading={isLoading} searchPlaceholder="Rechercher un devoir..." />
+      <ConfirmDialog
+        open={deleteId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
+        title="Supprimer le devoir ?"
+        description="Cette action est irréversible."
+        confirmLabel="Supprimer"
+        onConfirm={() => { if (deleteId) deleteDevoir.mutate(deleteId, { onSuccess: () => setDeleteId(null) }); }}
+        isLoading={deleteDevoir.isPending}
+      />
+      <Dialog open={showCreate} onOpenChange={(open) => setShowCreate(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><h2 className="text-lg font-semibold">Nouveau devoir</h2></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Titre</Label>
+              <Input {...register('titre')} placeholder="Exercices chapitre 3" />
+              {errors.titre && <p className="text-xs text-destructive">{errors.titre.message}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Matière</Label>
+                <select {...register('matiereId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {matieres?.map((m) => <option key={m.id} value={m.id}>{m.nom}</option>)}
+                </select>
+                {errors.matiereId && <p className="text-xs text-destructive">{errors.matiereId.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Classe</Label>
+                <select {...register('classeId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {classes?.map((c) => <option key={c.id} value={c.id}>{c.libelle ?? c.nom}</option>)}
+                </select>
+                {errors.classeId && <p className="text-xs text-destructive">{errors.classeId.message}</p>}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Date donnée</Label>
+                <Input type="date" {...register('dateDonnee')} />
+                {errors.dateDonnee && <p className="text-xs text-destructive">{errors.dateDonnee.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Date rendu (optionnel)</Label>
+                <Input type="date" {...register('dateRendu')} />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Description (optionnel)</Label>
+              <Textarea {...register('description')} placeholder="Consignes..." rows={2} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { reset(); setShowCreate(false); }}>Annuler</Button>
+              <Button type="submit" disabled={createDevoir.isPending}>
+                {createDevoir.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Créer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

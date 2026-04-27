@@ -1,146 +1,190 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { type ColumnDef } from '@tanstack/react-table';
-import { IconPlus, IconBan, IconWallet } from '@tabler/icons-react';
+import { Plus, CreditCard, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { paiementsApi, type CreatePaiementDto } from '@/lib/api/paiements';
-import { elevesApi } from '@/lib/api/eleves';
-import { fraisScolariteApi } from '@/lib/api/frais-scolarite';
-import { anneesScolairesApi } from '@/lib/api/annees-scolaires';
-import type { Paiement, SituationFinanciere } from '@/lib/types';
-import { ModePaiement } from '@/lib/types';
-import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { PageHeader } from '@/components/ui/page-header';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
-import { StatutPaiementBadge, ModePaiementBadge } from '@/components/ui/status-badge';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable } from '@/components/common/DataTable';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { usePaiements, useAnnulerPaiement, useCreatePaiement } from '@/features/paiements';
+import { useEleves } from '@/features/eleves';
+import { useFraisScolarite } from '@/features/frais-scolarite';
+import type { Paiement } from '@/lib/types';
+import { StatutPaiement, ModePaiement } from '@/lib/types';
 
-const EMPTY: CreatePaiementDto = { eleveId: 0, fraisScolariteId: 0, montant: 0, modePaiement: ModePaiement.ESPECES, anneeScolaireId: 0 };
+const createPaiementSchema = z.object({
+  eleveId: z.number().positive('Élève requis'),
+  fraisScolariteId: z.number().positive('Frais requis'),
+  montant: z.number().positive('Montant invalide'),
+  datePaiement: z.string().min(1, 'Date requise'),
+  modePaiement: z.nativeEnum(ModePaiement).optional(),
+  referencePaiement: z.string().optional(),
+  commentaire: z.string().optional(),
+});
+type CreatePaiementFormValues = z.infer<typeof createPaiementSchema>;
 
 export default function PaiementsPage() {
-  const qc = useQueryClient();
-  const [formOpen, setFormOpen] = useState(false);
-  const [cancelOpen, setCancelOpen] = useState(false);
-  const [cancelTarget, setCancelTarget] = useState<Paiement | null>(null);
-  const [form, setForm] = useState<CreatePaiementDto>(EMPTY);
-  const [situationEleveId, setSituationEleveId] = useState<number | null>(null);
-  const [situationOpen, setSituationOpen] = useState(false);
+  const { data: paiements, isLoading } = usePaiements();
+  const annuler = useAnnulerPaiement();
+  const createPaiement = useCreatePaiement();
+  const { data: eleves } = useEleves();
+  const { data: frais } = useFraisScolarite();
+  const [cancelId, setCancelId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const { data: anneeActive } = useQuery({ queryKey: ['annees-scolaires', 'active'], queryFn: anneesScolairesApi.active });
-  const { data: eleves = [] } = useQuery({ queryKey: ['eleves'], queryFn: () => elevesApi.list({}) });
-  const { data: frais = [] } = useQuery({ queryKey: ['frais-scolarite', anneeActive?.id], queryFn: () => fraisScolariteApi.list({ anneeScolaireId: anneeActive?.id }), enabled: !!anneeActive });
-  const { data: paiements = [], isLoading } = useQuery({ queryKey: ['paiements', anneeActive?.id], queryFn: () => paiementsApi.list({ anneeScolaireId: anneeActive?.id }), enabled: !!anneeActive });
-
-  const { data: situation, isLoading: loadingSituation } = useQuery<SituationFinanciere>({
-    queryKey: ['paiements', 'situation', situationEleveId, anneeActive?.id],
-    queryFn: () => paiementsApi.situation(situationEleveId!, anneeActive!.id),
-    enabled: !!situationEleveId && !!anneeActive && situationOpen,
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreatePaiementFormValues>({
+    resolver: zodResolver(createPaiementSchema),
   });
 
-  const createMutation = useMutation({ mutationFn: (dto: CreatePaiementDto) => paiementsApi.create(dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['paiements'] }); setFormOpen(false); } });
-  const cancelMutation = useMutation({ mutationFn: (id: number) => paiementsApi.annuler(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['paiements'] }); setCancelOpen(false); } });
+  const onSubmit = (data: CreatePaiementFormValues) => {
+    createPaiement.mutate(data, { onSuccess: () => { reset(); setShowCreate(false); } });
+  };
 
-  const openCreate = () => { setForm({ ...EMPTY, anneeScolaireId: anneeActive?.id ?? 0 }); setFormOpen(true); };
-  const handleSubmit = (ev: React.FormEvent) => { ev.preventDefault(); createMutation.mutate(form); };
-  const fmtAmount = (v: number) => new Intl.NumberFormat('fr-CM', { style: 'currency', currency: 'XAF', minimumFractionDigits: 0 }).format(v);
-  const fmtDate = (v: unknown) => { try { return format(new Date(v as string), 'dd/MM/yyyy', { locale: fr }); } catch { return '—'; } };
-
-  const columns: ColumnDef<Paiement, unknown>[] = [
-    { id: 'eleve', header: 'Élève', accessorFn: (r) => `${r.eleve?.nom} ${r.eleve?.prenom}`, enableSorting: true },
-    { id: 'frais', header: 'Frais', accessorFn: (r) => r.fraisScolarite?.libelle ?? '—' },
-    { accessorKey: 'montant', header: 'Montant', cell: ({ getValue }) => <span className="font-semibold">{fmtAmount(getValue() as number)}</span> },
-    { accessorKey: 'modePaiement', header: 'Mode', cell: ({ row }) => <ModePaiementBadge mode={row.original.modePaiement} /> },
-    { accessorKey: 'statut', header: 'Statut', cell: ({ row }) => <StatutPaiementBadge statut={row.original.statut} /> },
-    { accessorKey: 'datePaiement', header: 'Date', cell: ({ getValue }) => fmtDate(getValue()) },
+  const columns: ColumnDef<Paiement>[] = [
     {
-      id: 'actions', header: '',
+      id: 'eleve',
+      header: 'Élève',
+      cell: ({ row }) => {
+        const e = row.original.eleve;
+        return e ? `${e.prenom} ${e.nom}` : '—';
+      },
+    },
+    {
+      id: 'frais',
+      header: 'Frais',
+      cell: ({ row }) => row.original.fraisScolarite?.libelle ?? '—',
+    },
+    {
+      accessorKey: 'montant',
+      header: 'Montant (FCFA)',
+      cell: ({ getValue }) => (
+        <span className="font-mono">{(getValue() as number).toLocaleString('fr-FR')}</span>
+      ),
+    },
+    {
+      accessorKey: 'datePaiement',
+      header: 'Date',
+      cell: ({ getValue }) => {
+        const val = getValue() as string;
+        return val ? format(new Date(val), 'dd MMM yyyy', { locale: fr }) : '—';
+      },
+    },
+    {
+      accessorKey: 'modePaiement',
+      header: 'Mode',
+    },
+    {
+      accessorKey: 'statut',
+      header: 'Statut',
+      cell: ({ getValue }) => {
+        const val = getValue() as StatutPaiement;
+        return (
+          <Badge variant={val === StatutPaiement.VALIDE ? 'default' : 'destructive'} className="text-xs">
+            {val}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: 'actions',
       cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Voir la situation" title="Situation financière" onClick={() => { setSituationEleveId(row.original.eleve?.id ?? null); setSituationOpen(true); }}>
-            <IconWallet size={14} />
+        row.original.statut === StatutPaiement.VALIDE ? (
+          <Button
+            variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+            onClick={() => setCancelId(row.original.id)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
-          {row.original.statut !== 'ANNULE' && (
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-[hsl(var(--destructive))]" aria-label="Annuler" title="Annuler le paiement" onClick={() => { setCancelTarget(row.original); setCancelOpen(true); }}>
-              <IconBan size={14} />
-            </Button>
-          )}
-        </div>
+        ) : null
       ),
     },
   ];
 
   return (
     <div>
-      <PageHeader title="Paiements" description="Enregistrement et suivi des paiements de scolarité" action={<Button onClick={openCreate} size="sm" disabled={!anneeActive}><IconPlus size={16} />Nouveau paiement</Button>} />
-      <DataTable data={paiements} columns={columns} isLoading={isLoading} searchPlaceholder="Rechercher un paiement…" />
-
-      {/* Create form */}
-      <FormDialog open={formOpen} onOpenChange={setFormOpen} title="Enregistrer un paiement" onSubmit={handleSubmit} loading={createMutation.isPending}>
-        <div className="space-y-1"><Label htmlFor="payEleve">Élève *</Label>
-          <Select id="payEleve" value={form.eleveId?.toString() ?? ''} onChange={(e) => setForm({ ...form, eleveId: Number(e.target.value) })} placeholder="— Sélectionner —">
-            {eleves.map((e) => <option key={e.id} value={e.id}>{e.nom} {e.prenom}</option>)}
-          </Select></div>
-        <div className="space-y-1"><Label htmlFor="payFrais">Type de frais *</Label>
-          <Select id="payFrais" value={form.fraisScolariteId?.toString() ?? ''} onChange={(e) => setForm({ ...form, fraisScolariteId: Number(e.target.value) })} placeholder="— Sélectionner —">
-            {frais.map((f) => <option key={f.id} value={f.id}>{f.libelle}</option>)}
-          </Select></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="payMontant">Montant (FCFA) *</Label><Input id="payMontant" type="number" min={0} value={form.montant} onChange={(e) => setForm({ ...form, montant: Number(e.target.value) })} required /></div>
-          <div className="space-y-1"><Label htmlFor="payMode">Mode de paiement *</Label>
-            <Select id="payMode" value={form.modePaiement} onChange={(e) => setForm({ ...form, modePaiement: e.target.value as ModePaiement })}>
-              <option value={ModePaiement.ESPECES}>Espèces</option>
-              <option value={ModePaiement.VIREMENT}>Virement</option>
-              <option value={ModePaiement.MOBILE_MONEY}>Mobile Money</option>
-              <option value={ModePaiement.CHEQUE}>Chèque</option>
-            </Select></div>
-        </div>
-        <div className="space-y-1"><Label htmlFor="payRef">Référence</Label><Input id="payRef" value={form.reference ?? ''} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="Numéro de reçu, référence…" /></div>
-      </FormDialog>
-
-      {/* Cancel confirm */}
-      <ConfirmDialog open={cancelOpen} onOpenChange={setCancelOpen} title="Annuler ce paiement ?" description={cancelTarget ? `${cancelTarget.eleve?.nom} — ${fmtAmount(cancelTarget.montant)}` : undefined} onConfirm={() => cancelTarget && cancelMutation.mutate(cancelTarget.id)} loading={cancelMutation.isPending} confirmLabel="Annuler le paiement" variant="destructive" />
-
-      {/* Situation financière dialog */}
-      <Dialog open={situationOpen} onOpenChange={setSituationOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Situation financière</DialogTitle></DialogHeader>
-          {loadingSituation ? (
-            <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
-          ) : situation ? (
-            <div className="space-y-3 text-sm">
-              <p className="font-semibold text-base">{situation.eleve?.nom} {situation.eleve?.prenom}</p>
-              <div className="flex justify-between"><span className="text-[hsl(var(--muted-foreground))]">Total dû</span><span className="font-medium">{fmtAmount(situation.totalDu ?? 0)}</span></div>
-              <div className="flex justify-between"><span className="text-[hsl(var(--muted-foreground))]">Total payé</span><span className="font-medium text-green-600">{fmtAmount(situation.totalPaye ?? 0)}</span></div>
-              <div className="flex justify-between border-t border-[hsl(var(--border))] pt-2">
-                <span className="font-semibold">Solde restant</span>
-                <span className={`font-bold ${(situation.solde ?? 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmtAmount(situation.solde ?? 0)}</span>
-              </div>
-              {situation.paiements && situation.paiements.length > 0 && (
-                <div className="mt-3 max-h-48 overflow-y-auto">
-                  <p className="font-semibold mb-2">Historique</p>
-                  {situation.paiements.map((p: Paiement) => (
-                    <div key={p.id} className="flex justify-between text-xs py-1 border-b border-[hsl(var(--border))]/50">
-                      <span>{p.fraisScolarite?.libelle ?? '—'}</span>
-                      <div className="flex items-center gap-2">
-                        <StatutPaiementBadge statut={p.statut} />
-                        <span>{fmtAmount(p.montant)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+      <PageHeader
+        title="Paiements"
+        description="Suivi des paiements de scolarité"
+        icon={CreditCard}
+        actions={<Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" />Nouveau paiement</Button>}
+      />
+      <DataTable columns={columns} data={paiements ?? []} isLoading={isLoading} searchPlaceholder="Rechercher un paiement..." />
+      <ConfirmDialog
+        open={cancelId !== null}
+        onOpenChange={(open) => { if (!open) setCancelId(null); }}
+        title="Annuler le paiement ?"
+        description="Le paiement sera marqué comme annulé."
+        confirmLabel="Annuler le paiement"
+        onConfirm={() => { if (cancelId) annuler.mutate(cancelId, { onSuccess: () => setCancelId(null) }); }}
+        isLoading={annuler.isPending}
+      />
+      <Dialog open={showCreate} onOpenChange={(open) => setShowCreate(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><h2 className="text-lg font-semibold">Nouveau paiement</h2></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Élève</Label>
+              <select {...register('eleveId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                <option value="">Sélectionner un élève</option>
+                {eleves?.map((e) => <option key={e.id} value={e.id}>{e.prenom} {e.nom}</option>)}
+              </select>
+              {errors.eleveId && <p className="text-xs text-destructive">{errors.eleveId.message}</p>}
             </div>
-          ) : null}
+            <div className="space-y-1.5">
+              <Label>Frais de scolarité</Label>
+              <select {...register('fraisScolariteId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                <option value="">Sélectionner un frais</option>
+                {frais?.map((f) => <option key={f.id} value={f.id}>{f.libelle} — {f.montant.toLocaleString('fr')} FCFA</option>)}
+              </select>
+              {errors.fraisScolariteId && <p className="text-xs text-destructive">{errors.fraisScolariteId.message}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Montant (FCFA)</Label>
+                <Input type="number" min={0} {...register('montant', { valueAsNumber: true })} placeholder="50000" />
+                {errors.montant && <p className="text-xs text-destructive">{errors.montant.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Date de paiement</Label>
+                <Input type="date" {...register('datePaiement')} />
+                {errors.datePaiement && <p className="text-xs text-destructive">{errors.datePaiement.message}</p>}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Mode de paiement</Label>
+                <select {...register('modePaiement')} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {Object.values(ModePaiement).map((m) => <option key={m} value={m}>{m.replace(/_/g, ' ')}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Référence</Label>
+                <Input {...register('referencePaiement')} placeholder="REF-2024-001" />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Commentaire</Label>
+              <Textarea {...register('commentaire')} placeholder="Notes optionnelles..." rows={2} />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { reset(); setShowCreate(false); }}>Annuler</Button>
+              <Button type="submit" disabled={createPaiement.isPending}>
+                {createPaiement.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Enregistrer
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

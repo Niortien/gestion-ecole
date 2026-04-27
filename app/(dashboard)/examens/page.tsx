@@ -1,71 +1,72 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { type ColumnDef } from '@tanstack/react-table';
-import { IconPlus, IconPencil, IconTrash } from '@tabler/icons-react';
+import { Plus, Award, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { examensApi, type CreateExamenDto } from '@/lib/api/examens';
-import { classesApi } from '@/lib/api/classes';
-import { matieresApi } from '@/lib/api/matieres';
-import { anneesScolairesApi } from '@/lib/api/annees-scolaires';
-import type { Examen } from '@/lib/types';
-import { TypeExamen } from '@/lib/types';
-import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { PageHeader } from '@/components/ui/page-header';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { TypeExamenBadge } from '@/components/ui/status-badge';
-
-const EMPTY: CreateExamenDto = { libelle: '', type: TypeExamen.COMPOSITION, classeId: 0, date: '', anneeScolaireId: 0 };
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable } from '@/components/common/DataTable';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useExamens, useDeleteExamen, useCreateExamen, createExamenSchema } from '@/features/examens';
+import type { CreateExamenFormValues } from '@/features/examens';
+import { useClasses } from '@/features/classes';
+import { useMatieres } from '@/features/matieres';
+import { useAnneesScolaires } from '@/features/annees-scolaires';
+import type { Examen } from '@/lib/types';
+import { TypeExamen } from '@/lib/types';
 
 export default function ExamensPage() {
-  const qc = useQueryClient();
-  const [formOpen, setFormOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editing, setEditing] = useState<Examen | null>(null);
-  const [form, setForm] = useState<CreateExamenDto>(EMPTY);
-  const [deleteTarget, setDeleteTarget] = useState<Examen | null>(null);
+  const { data: examens, isLoading } = useExamens();
+  const deleteExamen = useDeleteExamen();
+  const createExamen = useCreateExamen();
+  const { data: classes } = useClasses();
+  const { data: matieres } = useMatieres();
+  const { data: annees } = useAnneesScolaires();
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const { data: anneeActive } = useQuery({ queryKey: ['annees-scolaires', 'active'], queryFn: anneesScolairesApi.active });
-  const { data: classes = [] } = useQuery({ queryKey: ['classes', anneeActive?.id], queryFn: () => classesApi.list({ anneeScolaireId: anneeActive?.id }), enabled: !!anneeActive });
-  const { data: matieres = [] } = useQuery({ queryKey: ['matieres'], queryFn: matieresApi.list });
-  const { data: examens = [], isLoading } = useQuery({ queryKey: ['examens', anneeActive?.id], queryFn: () => examensApi.list({ anneeScolaireId: anneeActive?.id }), enabled: !!anneeActive });
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateExamenFormValues>({
+    resolver: zodResolver(createExamenSchema),
+  });
 
-  const createMutation = useMutation({ mutationFn: (dto: CreateExamenDto) => examensApi.create(dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['examens'] }); setFormOpen(false); } });
-  const updateMutation = useMutation({ mutationFn: ({ id, dto }: { id: number; dto: Partial<CreateExamenDto> }) => examensApi.update(id, dto), onSuccess: () => { qc.invalidateQueries({ queryKey: ['examens'] }); setFormOpen(false); } });
-  const deleteMutation = useMutation({ mutationFn: (id: number) => examensApi.delete(id), onSuccess: () => { qc.invalidateQueries({ queryKey: ['examens'] }); setDeleteOpen(false); } });
-
-  const openCreate = () => { setEditing(null); setForm({ ...EMPTY, anneeScolaireId: anneeActive?.id ?? 0 }); setFormOpen(true); };
-  const openEdit = (ex: Examen) => {
-    setEditing(ex);
-    setForm({ libelle: ex.libelle, type: ex.type, classeId: ex.classe?.id ?? 0, matiereId: ex.matiere?.id, date: ex.date?.slice(0, 10) ?? '', dureeMinutes: ex.dureeMinutes, anneeScolaireId: ex.anneeScolaire?.id ?? 0 });
-    setFormOpen(true);
-  };
-  const handleSubmit = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (editing) updateMutation.mutate({ id: editing.id, dto: form });
-    else createMutation.mutate(form);
+  const onSubmit = (data: CreateExamenFormValues) => {
+    createExamen.mutate(data, { onSuccess: () => { reset(); setShowCreate(false); } });
   };
 
-  const columns: ColumnDef<Examen, unknown>[] = [
-    { accessorKey: 'libelle', header: 'Libellé', enableSorting: true },
-    { accessorKey: 'type', header: 'Type', cell: ({ row }) => <TypeExamenBadge type={row.original.type} /> },
-    { id: 'classe', header: 'Classe', accessorFn: (r) => r.classe?.nom ?? '—' },
-    { id: 'matiere', header: 'Matière', accessorFn: (r) => r.matiere?.nom ?? '—' },
-    { accessorKey: 'date', header: 'Date', cell: ({ getValue }) => { try { return format(new Date(getValue() as string), 'dd/MM/yyyy', { locale: fr }); } catch { return '—'; } } },
-    { accessorKey: 'dureeMinutes', header: 'Durée (min)', cell: ({ getValue }) => (getValue() as number | undefined) ?? '—' },
+  const columns: ColumnDef<Examen>[] = [
+    { accessorKey: 'titre', header: 'Titre', cell: ({ getValue }) => <span className="font-medium">{getValue() as string}</span> },
     {
-      id: 'actions', header: '',
+      accessorKey: 'type',
+      header: 'Type',
+      cell: ({ getValue }) => <Badge variant="outline" className="text-xs">{getValue() as string}</Badge>,
+    },
+    { id: 'matiere', header: 'Matière', cell: ({ row }) => row.original.matiere?.nom ?? '—' },
+    { id: 'classe', header: 'Classe', cell: ({ row }) => row.original.classe?.libelle ?? row.original.classe?.nom ?? '—' },
+    {
+      accessorKey: 'date',
+      header: 'Date',
+      cell: ({ getValue }) => {
+        const val = getValue() as string | undefined;
+        return val ? format(new Date(val), 'dd MMM yyyy', { locale: fr }) : '—';
+      },
+    },
+    { accessorKey: 'duree', header: 'Durée (min)', cell: ({ getValue }) => (getValue() as number | undefined) ?? '—' },
+    {
+      id: 'actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Modifier" onClick={() => openEdit(row.original)}><IconPencil size={14} /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-[hsl(var(--destructive))]" aria-label="Supprimer" onClick={() => { setDeleteTarget(row.original); setDeleteOpen(true); }}><IconTrash size={14} /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => setDeleteId(row.original.id)}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         </div>
       ),
     },
@@ -73,34 +74,86 @@ export default function ExamensPage() {
 
   return (
     <div>
-      <PageHeader title="Examens" description="Planification des examens et compositions" action={<Button onClick={openCreate} size="sm"><IconPlus size={16} />Ajouter un examen</Button>} />
-      <DataTable data={examens} columns={columns} isLoading={isLoading} searchPlaceholder="Rechercher un examen…" />
-
-      <FormDialog open={formOpen} onOpenChange={setFormOpen} title={editing ? 'Modifier l\'examen' : 'Ajouter un examen'} onSubmit={handleSubmit} loading={createMutation.isPending || updateMutation.isPending}>
-        <div className="space-y-1"><Label htmlFor="exLib">Libellé *</Label><Input id="exLib" value={form.libelle} onChange={(e) => setForm({ ...form, libelle: e.target.value })} required /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="exType">Type *</Label>
-            <Select id="exType" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as TypeExamen })}>
-              <option value={TypeExamen.DEVOIR}>Devoir</option>
-              <option value={TypeExamen.COMPOSITION}>Composition</option>
-              <option value={TypeExamen.CEPE}>CEPE</option>
-            </Select></div>
-          <div className="space-y-1"><Label htmlFor="exDate">Date *</Label><Input id="exDate" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="exClasse">Classe *</Label>
-            <Select id="exClasse" value={form.classeId?.toString() ?? ''} onChange={(e) => setForm({ ...form, classeId: Number(e.target.value) })} placeholder="— Sélectionner —">
-              {classes.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
-            </Select></div>
-          <div className="space-y-1"><Label htmlFor="exMatiere">Matière</Label>
-            <Select id="exMatiere" value={form.matiereId?.toString() ?? ''} onChange={(e) => setForm({ ...form, matiereId: e.target.value ? Number(e.target.value) : undefined })} placeholder="— Toutes matières —">
-              {matieres.map((m) => <option key={m.id} value={m.id}>{m.nom}</option>)}
-            </Select></div>
-        </div>
-        <div className="space-y-1"><Label htmlFor="exDuree">Durée (minutes)</Label><Input id="exDuree" type="number" min={0} value={form.dureeMinutes ?? ''} onChange={(e) => setForm({ ...form, dureeMinutes: e.target.value ? Number(e.target.value) : undefined })} /></div>
-      </FormDialog>
-
-      <ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="Supprimer cet examen ?" description={deleteTarget?.libelle} onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)} loading={deleteMutation.isPending} confirmLabel="Supprimer" />
+      <PageHeader
+        title="Examens"
+        description="Planification et suivi des examens"
+        icon={Award}
+        actions={<Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" />Nouvel examen</Button>}
+      />
+      <DataTable columns={columns} data={examens ?? []} isLoading={isLoading} searchPlaceholder="Rechercher un examen..." />
+      <ConfirmDialog
+        open={deleteId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
+        title="Supprimer l'examen ?"
+        description="Cette action est irréversible."
+        confirmLabel="Supprimer"
+        onConfirm={() => { if (deleteId) deleteExamen.mutate(deleteId, { onSuccess: () => setDeleteId(null) }); }}
+        isLoading={deleteExamen.isPending}
+      />
+      <Dialog open={showCreate} onOpenChange={(open) => setShowCreate(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><h2 className="text-lg font-semibold">Nouvel examen</h2></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
+            <div className="space-y-1.5">
+              <Label>Libellé</Label>
+              <Input {...register('libelle')} placeholder="Composition de Mathématiques" />
+              {errors.libelle && <p className="text-xs text-destructive">{errors.libelle.message}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Type</Label>
+                <select {...register('type')} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {Object.values(TypeExamen).map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                {errors.type && <p className="text-xs text-destructive">{errors.type.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Date</Label>
+                <Input type="date" {...register('date')} />
+                {errors.date && <p className="text-xs text-destructive">{errors.date.message}</p>}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Classe</Label>
+                <select {...register('classeId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {classes?.map((c) => <option key={c.id} value={c.id}>{c.libelle ?? c.nom}</option>)}
+                </select>
+                {errors.classeId && <p className="text-xs text-destructive">{errors.classeId.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Matière (optionnel)</Label>
+                <select {...register('matiereId', { setValueAs: (v) => v === '' ? undefined : parseInt(v) })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Toutes matières</option>
+                  {matieres?.map((m) => <option key={m.id} value={m.id}>{m.nom}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Année scolaire</Label>
+                <select {...register('anneeScolaireId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {annees?.map((a) => <option key={a.id} value={a.id}>{a.libelle}</option>)}
+                </select>
+                {errors.anneeScolaireId && <p className="text-xs text-destructive">{errors.anneeScolaireId.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Durée (min)</Label>
+                <Input type="number" {...register('dureeMinutes', { setValueAs: (v) => v === '' ? undefined : parseInt(v) })} placeholder="60" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { reset(); setShowCreate(false); }}>Annuler</Button>
+              <Button type="submit" disabled={createExamen.isPending}>
+                {createExamen.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Créer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

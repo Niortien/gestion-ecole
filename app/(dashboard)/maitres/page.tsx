@@ -1,104 +1,76 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { type ColumnDef } from '@tanstack/react-table';
-import { IconPlus, IconPencil, IconTrash, IconChalkboard } from '@tabler/icons-react';
-import { maitresApi, type CreateMaitreDto } from '@/lib/api/maitres';
-import { classesApi } from '@/lib/api/classes';
-import { anneesScolairesApi } from '@/lib/api/annees-scolaires';
-import type { Maitre } from '@/lib/types';
-import { DataTable } from '@/components/ui/data-table';
+import { Plus, GraduationCap, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PageHeader } from '@/components/ui/page-header';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { Badge } from '@/components/ui/badge';
-
-const EMPTY: CreateMaitreDto = { nom: '', prenom: '', email: '', password: '', telephone: '', diplome: '', specialite: '', dateEmbauche: '' };
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable } from '@/components/common/DataTable';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useMaitres, useDeleteMaitre, useCreateMaitre, createMaitreSchema } from '@/features/maitres';
+import type { CreateMaitreFormValues } from '@/features/maitres';
+import type { Maitre } from '@/lib/types';
+import { format } from 'date-fns';
+import { fr } from 'date-fns/locale';
 
 export default function MaitresPage() {
-  const qc = useQueryClient();
-  const [formOpen, setFormOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [affectOpen, setAffectOpen] = useState(false);
-  const [editing, setEditing] = useState<Maitre | null>(null);
-  const [affectTarget, setAffectTarget] = useState<Maitre | null>(null);
-  const [form, setForm] = useState<CreateMaitreDto>(EMPTY);
-  const [deleteTarget, setDeleteTarget] = useState<Maitre | null>(null);
-  const [selectedClasses, setSelectedClasses] = useState<number[]>([]);
+  const { data: maitres, isLoading } = useMaitres();
+  const deleteMaitre = useDeleteMaitre();
+  const createMaitre = useCreateMaitre();
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const { data: anneeActive } = useQuery({ queryKey: ['annees-scolaires', 'active'], queryFn: anneesScolairesApi.active });
-  const { data: maitres = [], isLoading } = useQuery({ queryKey: ['maitres'], queryFn: maitresApi.list });
-  const { data: classes = [] } = useQuery({
-    queryKey: ['classes', anneeActive?.id],
-    queryFn: () => classesApi.list({ anneeScolaireId: anneeActive?.id }),
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateMaitreFormValues>({
+    resolver: zodResolver(createMaitreSchema),
   });
 
-  const createMutation = useMutation({
-    mutationFn: (dto: CreateMaitreDto) => maitresApi.create(dto),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['maitres'] }); setFormOpen(false); },
-  });
-  const updateMutation = useMutation({
-    mutationFn: ({ id, dto }: { id: number; dto: Partial<CreateMaitreDto> }) => maitresApi.update(id, dto),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['maitres'] }); setFormOpen(false); },
-  });
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => maitresApi.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['maitres'] }); setDeleteOpen(false); },
-  });
-  const affectMutation = useMutation({
-    mutationFn: ({ id, classeIds }: { id: number; classeIds: number[] }) => maitresApi.affectClasses(id, classeIds),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['maitres'] }); setAffectOpen(false); },
-  });
-
-  const openCreate = () => { setEditing(null); setForm(EMPTY); setFormOpen(true); };
-  const openEdit = (m: Maitre) => {
-    setEditing(m);
-    setForm({ nom: m.nom, prenom: m.prenom, email: m.user?.email ?? '', password: '', telephone: m.telephone ?? '', diplome: m.diplome ?? '', specialite: m.specialite ?? '', dateEmbauche: m.dateEmbauche?.slice(0, 10) ?? '' });
-    setFormOpen(true);
-  };
-  const openAffect = (m: Maitre) => {
-    setAffectTarget(m);
-    setSelectedClasses(m.classes?.map((c) => c.id) ?? []);
-    setAffectOpen(true);
-  };
-  const handleSubmit = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    const dto = { ...form };
-    if (!dto.password) delete (dto as Partial<CreateMaitreDto>).password;
-    if (editing) updateMutation.mutate({ id: editing.id, dto });
-    else createMutation.mutate(dto);
-  };
-  const handleAffect = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (affectTarget) affectMutation.mutate({ id: affectTarget.id, classeIds: selectedClasses });
+  const onSubmit = (data: CreateMaitreFormValues) => {
+    createMaitre.mutate(data, { onSuccess: () => { reset(); setShowCreate(false); } });
   };
 
-  const columns: ColumnDef<Maitre, unknown>[] = [
-    { id: 'nom', header: 'Nom complet', accessorFn: (r) => `${r.nom} ${r.prenom}`, enableSorting: true },
-    { id: 'email', header: 'Email', accessorFn: (r) => r.user?.email ?? '—' },
-    { accessorKey: 'telephone', header: 'Téléphone', cell: ({ getValue }) => (getValue() as string) || '—' },
-    { accessorKey: 'specialite', header: 'Spécialité', cell: ({ getValue }) => (getValue() as string) || '—' },
+  const columns: ColumnDef<Maitre>[] = [
     {
-      id: 'classes', header: 'Classes',
+      id: 'nom_complet',
+      header: 'Enseignant',
       cell: ({ row }) => (
-        <div className="flex flex-wrap gap-1">
-          {row.original.classes?.length > 0
-            ? row.original.classes.map((c) => <Badge key={c.id} variant="secondary">{c.nom}</Badge>)
-            : <span className="text-[hsl(var(--muted-foreground))] text-xs">—</span>}
+        <div>
+          <div className="font-medium">{row.original.prenom} {row.original.nom}</div>
+          <div className="text-xs text-muted-foreground">{row.original.user?.email}</div>
         </div>
       ),
     },
+    { accessorKey: 'telephone', header: 'Téléphone', cell: ({ getValue }) => (getValue() as string | undefined) ?? '—' },
+    { accessorKey: 'specialite', header: 'Spécialité', cell: ({ getValue }) => (getValue() as string | undefined) ?? '—' },
+    { accessorKey: 'diplome', header: 'Diplôme', cell: ({ getValue }) => (getValue() as string | undefined) ?? '—' },
     {
-      id: 'actions', header: '',
+      accessorKey: 'dateEmbauche',
+      header: 'Date embauche',
+      cell: ({ getValue }) => {
+        const val = getValue() as string | undefined;
+        return val ? format(new Date(val), 'dd MMM yyyy', { locale: fr }) : '—';
+      },
+    },
+    {
+      id: 'classes',
+      header: 'Classes',
+      cell: ({ row }) => row.original.classes?.map((c) => c.libelle ?? c.nom).join(', ') || '—',
+    },
+    {
+      id: 'actions',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Assigner des classes" onClick={() => openAffect(row.original)}><IconChalkboard size={14} /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Modifier" onClick={() => openEdit(row.original)}><IconPencil size={14} /></Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-[hsl(var(--destructive))]" aria-label="Supprimer" onClick={() => { setDeleteTarget(row.original); setDeleteOpen(true); }}><IconTrash size={14} /></Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7"><Pencil className="h-3.5 w-3.5" /></Button>
+          <Button
+            variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+            onClick={() => setDeleteId(row.original.id)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         </div>
       ),
     },
@@ -106,50 +78,79 @@ export default function MaitresPage() {
 
   return (
     <div>
-      <PageHeader title="Maîtres" description="Gestion du personnel enseignant" action={<Button onClick={openCreate} size="sm"><IconPlus size={16} />Ajouter un maître</Button>} />
-      <DataTable data={maitres} columns={columns} isLoading={isLoading} searchPlaceholder="Rechercher un maître…" />
-
-      <FormDialog open={formOpen} onOpenChange={setFormOpen} title={editing ? 'Modifier le maître' : 'Ajouter un maître'} onSubmit={handleSubmit} loading={createMutation.isPending || updateMutation.isPending}>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="mNom">Nom *</Label><Input id="mNom" value={form.nom} onChange={(e) => setForm({ ...form, nom: e.target.value })} required /></div>
-          <div className="space-y-1"><Label htmlFor="mPrenom">Prénom *</Label><Input id="mPrenom" value={form.prenom} onChange={(e) => setForm({ ...form, prenom: e.target.value })} required /></div>
-        </div>
-        <div className="space-y-1"><Label htmlFor="mEmail">Email *</Label><Input id="mEmail" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></div>
-        {!editing && <div className="space-y-1"><Label htmlFor="mPassword">Mot de passe *</Label><Input id="mPassword" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></div>}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="mTel">Téléphone</Label><Input id="mTel" value={form.telephone ?? ''} onChange={(e) => setForm({ ...form, telephone: e.target.value })} /></div>
-          <div className="space-y-1"><Label htmlFor="mSpec">Spécialité</Label><Input id="mSpec" value={form.specialite ?? ''} onChange={(e) => setForm({ ...form, specialite: e.target.value })} /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label htmlFor="mDiplome">Diplôme</Label><Input id="mDiplome" value={form.diplome ?? ''} onChange={(e) => setForm({ ...form, diplome: e.target.value })} /></div>
-          <div className="space-y-1"><Label htmlFor="mEmb">Date d'embauche</Label><Input id="mEmb" type="date" value={form.dateEmbauche ?? ''} onChange={(e) => setForm({ ...form, dateEmbauche: e.target.value })} /></div>
-        </div>
-      </FormDialog>
-
-      {/* Affect classes dialog */}
-      <FormDialog open={affectOpen} onOpenChange={setAffectOpen} title={`Assigner des classes — ${affectTarget?.nom} ${affectTarget?.prenom}`} onSubmit={handleAffect} loading={affectMutation.isPending} submitLabel="Assigner">
-        <fieldset>
-          <legend className="text-sm font-medium mb-2">Sélectionner les classes</legend>
-          <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
-            {classes.map((c) => (
-              <label key={c.id} className="flex items-center gap-2 cursor-pointer p-2 rounded hover:bg-[hsl(var(--muted))]">
-                <input
-                  type="checkbox"
-                  checked={selectedClasses.includes(c.id)}
-                  onChange={(e) => {
-                    if (e.target.checked) setSelectedClasses((prev) => [...prev, c.id]);
-                    else setSelectedClasses((prev) => prev.filter((id) => id !== c.id));
-                  }}
-                  className="rounded"
-                />
-                <span className="text-sm">{c.nom}{c.libelle ? ` — ${c.libelle}` : ''}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-      </FormDialog>
-
-      <ConfirmDialog open={deleteOpen} onOpenChange={setDeleteOpen} title="Supprimer ce maître ?" description={deleteTarget ? `${deleteTarget.nom} ${deleteTarget.prenom} sera supprimé définitivement.` : ''} onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)} loading={deleteMutation.isPending} confirmLabel="Supprimer" />
+      <PageHeader
+        title="Enseignants"
+        description="Gestion du corps enseignant"
+        icon={GraduationCap}
+        actions={
+          <Button size="sm" onClick={() => setShowCreate(true)}><Plus className="mr-2 h-4 w-4" />Nouvel enseignant</Button>
+        }
+      />
+      <DataTable columns={columns} data={maitres ?? []} isLoading={isLoading} searchPlaceholder="Rechercher un enseignant..." />
+      <ConfirmDialog
+        open={deleteId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
+        title="Supprimer l'enseignant ?"
+        description="Cette action supprimera définitivement l'enseignant."
+        confirmLabel="Supprimer"
+        onConfirm={() => { if (deleteId) deleteMaitre.mutate(deleteId, { onSuccess: () => setDeleteId(null) }); }}
+        isLoading={deleteMaitre.isPending}
+      />
+      <Dialog open={showCreate} onOpenChange={(open) => setShowCreate(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><h2 className="text-lg font-semibold">Nouvel enseignant</h2></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Prénom</Label>
+                <Input {...register('prenom')} placeholder="Jean" />
+                {errors.prenom && <p className="text-xs text-destructive">{errors.prenom.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Nom</Label>
+                <Input {...register('nom')} placeholder="Dupont" />
+                {errors.nom && <p className="text-xs text-destructive">{errors.nom.message}</p>}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Email</Label>
+              <Input type="email" {...register('email')} placeholder="jean.dupont@ecole.fr" />
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Mot de passe</Label>
+              <Input type="password" {...register('password')} placeholder="••••••••" />
+              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Téléphone</Label>
+                <Input {...register('telephone')} placeholder="+226 70 00 00 00" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Spécialité</Label>
+                <Input {...register('specialite')} placeholder="Mathématiques" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Diplôme</Label>
+                <Input {...register('diplome')} placeholder="Licence" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Date d'embauche</Label>
+                <Input type="date" {...register('dateEmbauche')} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { reset(); setShowCreate(false); }}>Annuler</Button>
+              <Button type="submit" disabled={createMaitre.isPending}>
+                {createMaitre.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Créer
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,202 +1,120 @@
 'use client';
 
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { type ColumnDef } from '@tanstack/react-table';
-import { IconPlus, IconPencil, IconTrash, IconPhoto } from '@tabler/icons-react';
+import { Plus, Users, Eye, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
-import { elevesApi, type CreateEleveDto } from '@/lib/api/eleves';
-import { classesApi } from '@/lib/api/classes';
-import { parentsApi } from '@/lib/api/parents';
-import { anneesScolairesApi } from '@/lib/api/annees-scolaires';
-import type { Eleve, StatutEleve } from '@/lib/types';
-import { DataTable } from '@/components/ui/data-table';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select } from '@/components/ui/select';
-import { PageHeader } from '@/components/ui/page-header';
-import { FormDialog } from '@/components/ui/form-dialog';
-import { ConfirmDialog } from '@/components/ui/confirm-dialog';
-import { StatutEleveBadge } from '@/components/ui/status-badge';
-
-const EMPTY_FORM: CreateEleveDto = {
-  nom: '',
-  prenom: '',
-  dateNaissance: '',
-  lieuNaissance: '',
-  sexe: 'M',
-  numeroDossier: '',
-  classeId: undefined,
-  parentId: undefined,
-};
+import { Dialog, DialogContent, DialogHeader, DialogFooter } from '@/components/ui/dialog';
+import { PageHeader } from '@/components/common/PageHeader';
+import { DataTable } from '@/components/common/DataTable';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
+import { useEleves, useDeleteEleve, useCreateEleve, createEleveSchema } from '@/features/eleves';
+import type { CreateEleveFormValues } from '@/features/eleves';
+import { useClasses } from '@/features/classes';
+import { useParents } from '@/features/parents';
+import type { Eleve } from '@/lib/types';
+import { StatutEleve, Sexe } from '@/lib/types';
+import Link from 'next/link';
 
 export default function ElevesPage() {
-  const qc = useQueryClient();
-  const [formOpen, setFormOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [editing, setEditing] = useState<Eleve | null>(null);
-  const [form, setForm] = useState<CreateEleveDto>(EMPTY_FORM);
-  const [deleteTarget, setDeleteTarget] = useState<Eleve | null>(null);
+  const { data: eleves, isLoading } = useEleves();
+  const deleteEleve = useDeleteEleve();
+  const createEleve = useCreateEleve();
+  const { data: classes } = useClasses();
+  const { data: parents } = useParents();
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const { data: anneeActive } = useQuery({
-    queryKey: ['annees-scolaires', 'active'],
-    queryFn: anneesScolairesApi.active,
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateEleveFormValues>({
+    resolver: zodResolver(createEleveSchema),
   });
 
-  const { data: eleves = [], isLoading } = useQuery({
-    queryKey: ['eleves'],
-    queryFn: () => elevesApi.list(),
-  });
-
-  const { data: classes = [] } = useQuery({
-    queryKey: ['classes', anneeActive?.id],
-    queryFn: () => classesApi.list({ anneeScolaireId: anneeActive?.id }),
-    enabled: !!anneeActive,
-  });
-
-  const { data: parents = [] } = useQuery({
-    queryKey: ['parents'],
-    queryFn: parentsApi.list,
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (dto: CreateEleveDto) => elevesApi.create(dto),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['eleves'] }); setFormOpen(false); },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, dto }: { id: number; dto: Partial<CreateEleveDto> }) => elevesApi.update(id, dto),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['eleves'] }); setFormOpen(false); },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => elevesApi.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['eleves'] }); setDeleteOpen(false); },
-  });
-
-  const statutMutation = useMutation({
-    mutationFn: ({ id, statut }: { id: number; statut: StatutEleve }) => elevesApi.updateStatut(id, statut),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['eleves'] }),
-  });
-
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setFormOpen(true); };
-  const openEdit = (e: Eleve) => {
-    setEditing(e);
-    setForm({
-      nom: e.nom,
-      prenom: e.prenom,
-      dateNaissance: e.dateNaissance?.slice(0, 10) ?? '',
-      lieuNaissance: e.lieuNaissance ?? '',
-      sexe: e.sexe,
-      numeroDossier: e.numeroDossier ?? '',
-      classeId: e.classe?.id,
-      parentId: e.parent?.id,
-    });
-    setFormOpen(true);
+  const onSubmit = (data: CreateEleveFormValues) => {
+    createEleve.mutate(data, { onSuccess: () => { reset(); setShowCreate(false); } });
   };
 
-  const handleSubmit = (ev: React.FormEvent) => {
-    ev.preventDefault();
-    const dto = { ...form };
-    if (!dto.classeId) delete dto.classeId;
-    if (!dto.parentId) delete dto.parentId;
-    if (editing) updateMutation.mutate({ id: editing.id, dto });
-    else createMutation.mutate(dto);
-  };
-
-  const columns: ColumnDef<Eleve, unknown>[] = [
+  const columns: ColumnDef<Eleve>[] = [
     {
-      id: 'photo',
-      header: '',
-      cell: ({ row }) =>
-        row.original.photo ? (
-          <img
-            src={`http://localhost:8000/uploads/${row.original.photo}`}
-            alt={`Photo de ${row.original.prenom}`}
-            className="w-8 h-8 rounded-full object-cover"
-          />
-        ) : (
-          <div className="w-8 h-8 rounded-full bg-[hsl(var(--muted))] flex items-center justify-center text-[hsl(var(--muted-foreground))]">
-            <IconPhoto size={14} aria-hidden="true" />
+      accessorKey: 'numeroDossier',
+      header: 'N° Dossier',
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {row.original.numeroDossier ?? '—'}
+        </span>
+      ),
+    },
+    {
+      id: 'nom_complet',
+      header: 'Élève',
+      cell: ({ row }) => (
+        <div className="font-medium">
+          {row.original.prenom} {row.original.nom}
+          <div className="text-xs text-muted-foreground">
+            {row.original.sexe === Sexe.M ? 'Garçon' : 'Fille'}
           </div>
-        ),
-    },
-    { accessorKey: 'nom', header: 'Nom', enableSorting: true },
-    { accessorKey: 'prenom', header: 'Prénom', enableSorting: true },
-    {
-      id: 'classe',
-      header: 'Classe',
-      accessorFn: (r) => r.classe?.nom ?? '—',
-      enableSorting: true,
-    },
-    {
-      id: 'parent',
-      header: 'Parent',
-      accessorFn: (r) => r.parent ? `${r.parent.nom} ${r.parent.prenom}` : '—',
+        </div>
+      ),
     },
     {
       accessorKey: 'dateNaissance',
       header: 'Date de naissance',
       cell: ({ getValue }) => {
-        const v = getValue() as string;
-        if (!v) return '—';
-        try { return format(new Date(v), 'dd/MM/yyyy', { locale: fr }); }
-        catch { return v; }
+        const val = getValue() as string;
+        return val ? format(new Date(val), 'dd MMM yyyy', { locale: fr }) : '—';
       },
     },
     {
-      accessorKey: 'sexe',
-      header: 'Sexe',
-      cell: ({ getValue }) => getValue() === 'M' ? 'Masculin' : 'Féminin',
+      id: 'classe',
+      header: 'Classe',
+      cell: ({ row }) => (
+        <span className="text-sm">{row.original.classe?.libelle ?? row.original.classe?.nom ?? '—'}</span>
+      ),
+    },
+    {
+      id: 'parent',
+      header: 'Parent',
+      cell: ({ row }) => (
+        <span className="text-sm">
+          {row.original.parent ? `${row.original.parent.prenom} ${row.original.parent.nom}` : '—'}
+        </span>
+      ),
     },
     {
       accessorKey: 'statut',
       header: 'Statut',
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <StatutEleveBadge statut={row.original.statut} />
-          <select
-            aria-label="Changer le statut"
-            value=""
-            onChange={(e) => {
-              if (!e.target.value) return;
-              statutMutation.mutate({ id: row.original.id, statut: e.target.value as StatutEleve });
-              e.target.value = '';
-            }}
-            className="text-xs border rounded px-1 py-0.5 bg-transparent text-[hsl(var(--muted-foreground))]"
-          >
-            <option value="">Changer…</option>
-            <option value="INSCRIT">Inscrit</option>
-            <option value="TRANSFERE">Transféré</option>
-            <option value="ABANDONNE">Abandonné</option>
-          </select>
-        </div>
-      ),
+      cell: ({ getValue }) => {
+        const val = getValue() as StatutEleve;
+        return (
+          <Badge variant={val === StatutEleve.INSCRIT ? 'default' : 'secondary'} className="text-xs">
+            {val}
+          </Badge>
+        );
+      },
     },
     {
       id: 'actions',
-      header: '',
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={`Modifier ${row.original.nom}`}
-            onClick={() => openEdit(row.original)}
-            className="h-7 w-7"
-          >
-            <IconPencil size={14} />
+          <Button variant="ghost" size="icon" className="h-7 w-7" render={<Link href={`/eleves/${row.original.id}`} />}>
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" render={<Link href={`/eleves/${row.original.id}/modifier`} />}>
+            <Pencil className="h-3.5 w-3.5" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            aria-label={`Supprimer ${row.original.nom}`}
-            onClick={() => { setDeleteTarget(row.original); setDeleteOpen(true); }}
-            className="h-7 w-7 text-[hsl(var(--destructive))] hover:text-[hsl(var(--destructive))]"
+            className="h-7 w-7 text-destructive hover:text-destructive"
+            onClick={() => setDeleteId(row.original.id)}
           >
-            <IconTrash size={14} />
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       ),
@@ -208,99 +126,112 @@ export default function ElevesPage() {
       <PageHeader
         title="Élèves"
         description="Gestion des élèves inscrits"
-        action={
-          <Button onClick={openCreate} size="sm">
-            <IconPlus size={16} aria-hidden="true" />
-            Ajouter un élève
-          </Button>
+        icon={Users}
+        actions={
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Nouvel élève
+            </Button>
         }
       />
 
       <DataTable
-        data={eleves}
         columns={columns}
+        data={eleves ?? []}
         isLoading={isLoading}
-        searchPlaceholder="Rechercher un élève…"
+        searchPlaceholder="Rechercher un élève..."
       />
 
-      {/* Create / Edit dialog */}
-      <FormDialog
-        open={formOpen}
-        onOpenChange={setFormOpen}
-        title={editing ? 'Modifier un élève' : 'Ajouter un élève'}
-        onSubmit={handleSubmit}
-        loading={createMutation.isPending || updateMutation.isPending}
-        submitLabel={editing ? 'Enregistrer' : 'Ajouter'}
-      >
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="nom">Nom *</Label>
-            <Input id="nom" value={form.nom} onChange={(e) => setForm({ ...form, nom: e.target.value })} required />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="prenom">Prénom *</Label>
-            <Input id="prenom" value={form.prenom} onChange={(e) => setForm({ ...form, prenom: e.target.value })} required />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label htmlFor="dateNaissance">Date de naissance *</Label>
-            <Input id="dateNaissance" type="date" value={form.dateNaissance} onChange={(e) => setForm({ ...form, dateNaissance: e.target.value })} required />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="sexe">Sexe *</Label>
-            <Select id="sexe" value={form.sexe} onChange={(e) => setForm({ ...form, sexe: e.target.value as 'M' | 'F' })}>
-              <option value="M">Masculin</option>
-              <option value="F">Féminin</option>
-            </Select>
-          </div>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="lieuNaissance">Lieu de naissance</Label>
-          <Input id="lieuNaissance" value={form.lieuNaissance ?? ''} onChange={(e) => setForm({ ...form, lieuNaissance: e.target.value })} />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="numeroDossier">Numéro de dossier</Label>
-          <Input id="numeroDossier" value={form.numeroDossier ?? ''} onChange={(e) => setForm({ ...form, numeroDossier: e.target.value })} />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="classeId">Classe</Label>
-          <Select
-            id="classeId"
-            value={form.classeId?.toString() ?? ''}
-            onChange={(e) => setForm({ ...form, classeId: e.target.value ? Number(e.target.value) : undefined })}
-            placeholder="— Sélectionner une classe —"
-          >
-            {classes.map((c) => (
-              <option key={c.id} value={c.id}>{c.nom}{c.libelle ? ` — ${c.libelle}` : ''}</option>
-            ))}
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor="parentId">Parent</Label>
-          <Select
-            id="parentId"
-            value={form.parentId?.toString() ?? ''}
-            onChange={(e) => setForm({ ...form, parentId: e.target.value ? Number(e.target.value) : undefined })}
-            placeholder="— Sélectionner un parent —"
-          >
-            {parents.map((p) => (
-              <option key={p.id} value={p.id}>{p.nom} {p.prenom}</option>
-            ))}
-          </Select>
-        </div>
-      </FormDialog>
-
-      {/* Delete confirm */}
       <ConfirmDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        title="Supprimer cet élève ?"
-        description={deleteTarget ? `${deleteTarget.nom} ${deleteTarget.prenom} sera supprimé définitivement.` : ''}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
-        loading={deleteMutation.isPending}
+        open={deleteId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteId(null); }}
+        title="Supprimer l'élève ?"
+        description="Cette action est irréversible. Toutes les données associées seront supprimées."
         confirmLabel="Supprimer"
+        onConfirm={() => {
+          if (deleteId) {
+            deleteEleve.mutate(deleteId, { onSuccess: () => setDeleteId(null) });
+          }
+        }}
+        isLoading={deleteEleve.isPending}
       />
+      <Dialog open={showCreate} onOpenChange={(open) => setShowCreate(open)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><h2 className="text-lg font-semibold">Nouvel élève</h2></DialogHeader>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 mt-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Prénom</Label>
+                <Input {...register('prenom')} placeholder="Aminata" />
+                {errors.prenom && <p className="text-xs text-destructive">{errors.prenom.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Nom</Label>
+                <Input {...register('nom')} placeholder="Ouedraogo" />
+                {errors.nom && <p className="text-xs text-destructive">{errors.nom.message}</p>}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Date de naissance</Label>
+                <Input type="date" {...register('dateNaissance')} />
+                {errors.dateNaissance && <p className="text-xs text-destructive">{errors.dateNaissance.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Lieu de naissance</Label>
+                <Input {...register('lieuNaissance')} placeholder="Ouagadougou" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Sexe</Label>
+                <select {...register('sexe')} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  <option value={Sexe.M}>Masculin</option>
+                  <option value={Sexe.F}>Féminin</option>
+                </select>
+                {errors.sexe && <p className="text-xs text-destructive">{errors.sexe.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>N° dossier</Label>
+                <Input {...register('numeroDossier')} placeholder="2024-001" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Classe</Label>
+                <select {...register('classeId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {classes?.map((c) => <option key={c.id} value={c.id}>{c.libelle ?? c.nom}</option>)}
+                </select>
+                {errors.classeId && <p className="text-xs text-destructive">{errors.classeId.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Parent</Label>
+                <select {...register('parentId', { valueAsNumber: true })} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                  <option value="">Sélectionner</option>
+                  {parents?.map((p) => <option key={p.id} value={p.id}>{p.prenom} {p.nom}</option>)}
+                </select>
+                {errors.parentId && <p className="text-xs text-destructive">{errors.parentId.message}</p>}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Statut</Label>
+              <select {...register('statut')} className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none">
+                <option value="">Sélectionner</option>
+                {Object.values(StatutEleve).map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              {errors.statut && <p className="text-xs text-destructive">{errors.statut.message}</p>}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => { reset(); setShowCreate(false); }}>Annuler</Button>
+              <Button type="submit" disabled={createEleve.isPending}>
+                {createEleve.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Inscrire
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

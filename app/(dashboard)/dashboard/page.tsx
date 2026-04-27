@@ -1,256 +1,121 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useAuthStore } from '@/stores/auth.store';
+import { UserRole } from '@/lib/types';
+import { useEleves } from '@/features/eleves';
+import { useClasses } from '@/features/classes';
+import { useMaitres } from '@/features/maitres';
+import { useNonLus } from '@/features/messagerie';
+import { StatCard } from '@/components/common/StatCard';
+import { PageHeader } from '@/components/common/PageHeader';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import {
-  IconUsers,
-  IconChalkboard,
-  IconReceipt,
-  IconUserOff,
-  IconTrendingUp,
-} from '@tabler/icons-react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from 'recharts';
-import { rapportsApi } from '@/lib/api/rapports';
-import { anneesScolairesApi } from '@/lib/api/annees-scolaires';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
+  LayoutDashboard,
+  Users,
+  BookOpen,
+  GraduationCap,
+  MessageSquare,
+  TrendingUp,
+  ArrowRight,
+  School,
+} from 'lucide-react';
+import Link from 'next/link';
 
-function StatCard({
-  title,
-  value,
-  icon,
-  color,
-  loading,
-}: {
-  title: string;
-  value: string | number;
-  icon: React.ReactNode;
-  color: string;
-  loading?: boolean;
-}) {
-  return (
-    <Card>
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-              {title}
-            </p>
-            {loading ? (
-              <Skeleton className="mt-2 h-7 w-20" />
-            ) : (
-              <p className="mt-1.5 text-2xl font-bold text-[hsl(var(--foreground))]">{value}</p>
-            )}
-          </div>
-          <div className={`flex items-center justify-center w-10 h-10 rounded-xl ${color}`}>
-            {icon}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-const COLORS = ['#4F6AF5', '#22c55e', '#f59e0b', '#ef4444'];
+const QUICK_LINKS = [
+  { label: 'Gérer les élèves', href: '/eleves', icon: Users, color: 'text-indigo-500' },
+  { label: 'Voir les classes', href: '/classes', icon: School, color: 'text-emerald-500' },
+  { label: 'Enseignants', href: '/maitres', icon: GraduationCap, color: 'text-violet-500' },
+  { label: 'Messagerie', href: '/messagerie', icon: MessageSquare, color: 'text-amber-500' },
+];
 
 export default function DashboardPage() {
-  const { data: anneeActive } = useQuery({
-    queryKey: ['annees-scolaires', 'active'],
-    queryFn: anneesScolairesApi.active,
-  });
+  const { user } = useAuthStore();
+  const { data: eleves, isLoading: loadingEleves } = useEleves();
+  const { data: classes, isLoading: loadingClasses } = useClasses();
+  const { data: maitres, isLoading: loadingMaitres } = useMaitres();
+  const { data: messages, isLoading: loadingMessages } = useNonLus();
 
-  const { data: rapportDir, isLoading: loadingDir } = useQuery({
-    queryKey: ['rapports', 'directeur', anneeActive?.id],
-    queryFn: () => rapportsApi.directeur({ anneeScolaireId: anneeActive?.id }),
-    enabled: !!anneeActive,
-  });
-
-  const { data: rapportCompta, isLoading: loadingCompta } = useQuery({
-    queryKey: ['rapports', 'comptable', anneeActive?.id],
-    queryFn: () => rapportsApi.comptable({ anneeScolaireId: anneeActive?.id }),
-    enabled: !!anneeActive,
-  });
-
-  const pieData =
-    rapportDir?.eleveParClasse?.map((item) => ({
-      name: item.classe,
-      value: item.count,
-    })) ?? [];
-
-  const barData = rapportCompta?.paiementsParMois ?? [];
+  const role = user?.role as UserRole | undefined;
+  const firstName = user?.email?.split('@')[0] ?? 'Utilisateur';
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Tableau de bord</h1>
-        {anneeActive && (
-          <p className="text-sm text-[hsl(var(--muted-foreground))] mt-0.5">
-            Année scolaire : <span className="font-medium">{anneeActive.libelle}</span>
-          </p>
+      <PageHeader
+        title={`Bonjour, ${firstName} 👋`}
+        description="Bienvenue sur votre tableau de bord EcolePro"
+        icon={LayoutDashboard}
+        actions={
+          <Badge variant="outline" className="text-xs font-medium border-primary/30 text-primary bg-primary/5 px-3 py-1">
+            <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            {role}
+          </Badge>
+        }
+      />
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {role !== UserRole.COMPTABLE && (
+          <StatCard
+            title="Élèves inscrits"
+            value={eleves?.length ?? 0}
+            icon={Users}
+            color="indigo"
+            isLoading={loadingEleves}
+            description="Total des élèves actifs"
+          />
         )}
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {role !== UserRole.COMPTABLE && (
+          <StatCard
+            title="Classes actives"
+            value={classes?.length ?? 0}
+            icon={BookOpen}
+            color="emerald"
+            isLoading={loadingClasses}
+            description="Classes de l'année en cours"
+          />
+        )}
+        {(role === UserRole.ADMIN || role === UserRole.DIRECTEUR) && (
+          <StatCard
+            title="Enseignants"
+            value={maitres?.length ?? 0}
+            icon={GraduationCap}
+            color="violet"
+            isLoading={loadingMaitres}
+            description="Personnel enseignant"
+          />
+        )}
         <StatCard
-          title="Total élèves"
-          value={rapportDir?.totalEleves ?? 0}
-          icon={<IconUsers size={20} className="text-white" />}
-          color="bg-[hsl(var(--primary))]"
-          loading={loadingDir}
-        />
-        <StatCard
-          title="Classes actives"
-          value={rapportDir?.totalClasses ?? 0}
-          icon={<IconChalkboard size={20} className="text-white" />}
-          color="bg-emerald-500"
-          loading={loadingDir}
-        />
-        <StatCard
-          title="Paiements du mois"
-          value={
-            rapportCompta?.totalPaiementsValides
-              ? `${Number(rapportCompta.totalPaiementsValides).toLocaleString('fr-FR')} F`
-              : '—'
-          }
-          icon={<IconReceipt size={20} className="text-white" />}
-          color="bg-amber-500"
-          loading={loadingCompta}
-        />
-        <StatCard
-          title="Absences du jour"
-          value={rapportDir?.absencesAujourdhui ?? 0}
-          icon={<IconUserOff size={20} className="text-white" />}
-          color="bg-rose-500"
-          loading={loadingDir}
+          title="Messages non lus"
+          value={messages?.length ?? 0}
+          icon={MessageSquare}
+          color="amber"
+          isLoading={loadingMessages}
+          description="Dans votre messagerie"
         />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <IconTrendingUp size={16} aria-hidden="true" />
-              Paiements par mois
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loadingCompta ? (
-              <Skeleton className="h-48 w-full" />
-            ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={barData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="mois" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    formatter={(v: number) => [`${v.toLocaleString('fr-FR')} F`, 'Paiements']}
-                    contentStyle={{
-                      background: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                  />
-                  <Bar dataKey="total" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <IconUsers size={16} aria-hidden="true" />
-              Répartition des élèves par classe
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loadingDir ? (
-              <Skeleton className="h-48 w-full" />
-            ) : pieData.length === 0 ? (
-              <div className="h-48 flex items-center justify-center text-sm text-[hsl(var(--muted-foreground))]">
-                Aucune donnée
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={70}
-                    dataKey="value"
-                    label={({ name, value }) => `${name}: ${value}`}
-                    labelLine={false}
-                  >
-                    {pieData.map((_, index) => (
-                      <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: 8,
-                      fontSize: 12,
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Quick stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Card>
-          <CardContent className="p-5 text-center">
-            <p className="text-xs text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Maîtres</p>
-            {loadingDir ? (
-              <Skeleton className="h-7 w-12 mx-auto mt-2" />
-            ) : (
-              <p className="text-2xl font-bold mt-1.5">{rapportDir?.totalMaitres ?? 0}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5 text-center">
-            <p className="text-xs text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Parents</p>
-            {loadingDir ? (
-              <Skeleton className="h-7 w-12 mx-auto mt-2" />
-            ) : (
-              <p className="text-2xl font-bold mt-1.5">{rapportDir?.totalParents ?? 0}</p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5 text-center">
-            <p className="text-xs text-[hsl(var(--muted-foreground))] uppercase tracking-wide">Taux présence</p>
-            {loadingDir ? (
-              <Skeleton className="h-7 w-16 mx-auto mt-2" />
-            ) : (
-              <p className="text-2xl font-bold mt-1.5">
-                {rapportDir?.tauxPresence != null ? `${rapportDir.tauxPresence}%` : '—'}
-              </p>
-            )}
-          </CardContent>
-        </Card>
+      {/* Quick access */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-foreground">Accès rapide</h2>
+          <TrendingUp className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {QUICK_LINKS.map((link) => (
+            <Link key={link.href} href={link.href}>
+              <Card className="group border border-border/60 hover:border-primary/30 hover:shadow-md transition-all duration-200 cursor-pointer rounded-xl">
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <link.icon className={`h-5 w-5 ${link.color}`} />
+                    <span className="text-sm font-medium text-foreground">{link.label}</span>
+                  </div>
+                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/40 group-hover:text-primary transition-colors" />
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
       </div>
     </div>
   );

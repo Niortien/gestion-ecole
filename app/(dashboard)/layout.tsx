@@ -1,31 +1,29 @@
 'use client';
 
-import { useState } from 'react';
-import { Sidebar } from '@/components/layout/sidebar';
-import { TopBar } from '@/components/layout/topbar';
-import { AuthGuard } from '@/providers/auth-guard';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { Topbar } from '@/components/layout/Topbar';
+import { MobileNav } from '@/components/layout/MobileNav';
+import { useAppStore } from '@/stores/app.store';
+import { cn } from '@/lib/utils';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const { sidebarCollapsed } = useAppStore();
 
   return (
-    <AuthGuard>
-      <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))]">
-        {/* Sidebar */}
-        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((v) => !v)} />
-
-        {/* Main content area */}
-        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-          <TopBar />
-          <main
-            id="main-content"
-            className="flex-1 overflow-y-auto p-4 md:p-6"
-            tabIndex={-1}
-          >
-            {children}
-          </main>
+    <div className="min-h-screen bg-background">
+      <Sidebar />
+      <Topbar />
+      <main
+        className={cn(
+          'transition-all duration-300 pt-14 pb-20 md:pb-6',
+          sidebarCollapsed ? 'md:ml-15' : 'md:ml-65',
+        )}
+      >
+        <div className="p-4 md:p-6 max-w-[1440px] mx-auto">
+          {children}
         </div>
-      </div>
-    </AuthGuard>
+      </main>
+      <MobileNav />
+    </div>
   );
 }

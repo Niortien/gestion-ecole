@@ -2,175 +2,278 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { cn } from '@/lib/utils';
 import {
-  IconLayoutDashboard,
-  IconUsers,
-  IconSchool,
-  IconChalkboard,
-  IconNotebook,
-  IconClipboardList,
-  IconFileText,
-  IconCalendar,
-  IconBook,
-  IconCoin,
-  IconReceipt,
-  IconWallet,
-  IconMail,
-  IconSettings,
-  IconChevronLeft,
-  IconMenu2,
-} from '@tabler/icons-react';
+  LayoutDashboard,
+  CalendarRange,
+  School,
+  Users,
+  GraduationCap,
+  BookOpen,
+  ClipboardList,
+  FileCheck,
+  CalendarCheck,
+  Star,
+  FileText,
+  Banknote,
+  CreditCard,
+  ArrowDownCircle,
+  Vault,
+  MessageSquare,
+  ShieldCheck,
+  HeartHandshake,
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  Bell,
+} from 'lucide-react';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuthStore } from '@/stores/auth.store';
+import { useAppStore } from '@/stores/app.store';
+import { useUnreadCount } from '@/features/messagerie';
 import { UserRole } from '@/lib/types';
+import { useRouter } from 'next/navigation';
 
 interface NavItem {
   label: string;
   href: string;
-  icon: React.ReactNode;
+  icon: React.ElementType;
+  badge?: React.ReactNode;
   roles?: UserRole[];
 }
 
-interface NavGroup {
+interface NavSection {
   title: string;
+  roles?: UserRole[];
   items: NavItem[];
 }
 
-const navGroups: NavGroup[] = [
+function UnreadBadge() {
+  const { data: count } = useUnreadCount();
+  if (!count) return null;
+  return (
+    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-bold text-white">
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
+const NAV_SECTIONS: NavSection[] = [
   {
-    title: 'Principal',
+    title: 'Établissement',
     items: [
-      { label: 'Tableau de bord', href: '/dashboard', icon: <IconLayoutDashboard size={18} /> },
+      { label: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Années scolaires', href: '/annee-scolaire', icon: CalendarRange },
+      { label: 'Classes', href: '/classes', icon: School },
     ],
   },
   {
-    title: 'Académique',
+    title: 'Pédagogie',
+    roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.MAITRE],
     items: [
-      { label: 'Élèves', href: '/eleves', icon: <IconUsers size={18} /> },
-      { label: 'Classes', href: '/classes', icon: <IconChalkboard size={18} /> },
-      { label: 'Maîtres', href: '/maitres', icon: <IconSchool size={18} />, roles: [UserRole.ADMIN, UserRole.DIRECTEUR] },
-      { label: 'Parents', href: '/parents', icon: <IconUsers size={18} />, roles: [UserRole.ADMIN, UserRole.DIRECTEUR] },
-      { label: 'Notes', href: '/notes', icon: <IconNotebook size={18} /> },
-      { label: 'Bulletins', href: '/bulletins', icon: <IconFileText size={18} /> },
-      { label: 'Présences', href: '/presences', icon: <IconClipboardList size={18} /> },
-      { label: 'Examens', href: '/examens', icon: <IconCalendar size={18} /> },
-      { label: 'Devoirs', href: '/devoirs', icon: <IconBook size={18} /> },
+      { label: 'Élèves', href: '/eleves', icon: Users },
+      { label: 'Enseignants', href: '/maitres', icon: GraduationCap },
+      { label: 'Matières', href: '/matieres', icon: BookOpen },
+      { label: 'Devoirs', href: '/devoirs', icon: ClipboardList },
+      { label: 'Examens', href: '/examens', icon: FileCheck },
     ],
   },
   {
-    title: 'Finance',
+    title: 'Suivi',
+    roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.MAITRE, UserRole.PARENT],
     items: [
-      { label: 'Frais de scolarité', href: '/frais-scolarite', icon: <IconCoin size={18} />, roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.COMPTABLE] },
-      { label: 'Paiements', href: '/paiements', icon: <IconReceipt size={18} />, roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.COMPTABLE] },
-      { label: 'Dépenses', href: '/depenses', icon: <IconWallet size={18} />, roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.COMPTABLE] },
-      { label: 'Caisse', href: '/caisse', icon: <IconWallet size={18} />, roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.COMPTABLE] },
+      { label: 'Présences', href: '/presences', icon: CalendarCheck },
+      { label: 'Notes', href: '/notes', icon: Star },
+      { label: 'Bulletins', href: '/bulletins', icon: FileText },
+    ],
+  },
+  {
+    title: 'Finances',
+    roles: [UserRole.ADMIN, UserRole.DIRECTEUR, UserRole.COMPTABLE],
+    items: [
+      { label: 'Frais de scolarité', href: '/frais-scolarite', icon: Banknote },
+      { label: 'Paiements', href: '/paiements', icon: CreditCard },
+      { label: 'Dépenses', href: '/depenses', icon: ArrowDownCircle },
+      { label: 'Caisse', href: '/caisse', icon: Vault },
     ],
   },
   {
     title: 'Communication',
     items: [
-      { label: 'Messagerie', href: '/messagerie', icon: <IconMail size={18} /> },
+      {
+        label: 'Messagerie',
+        href: '/messagerie',
+        icon: MessageSquare,
+        badge: <UnreadBadge />,
+      },
+      { label: 'Notifications', href: '/notifications', icon: Bell },
     ],
   },
   {
-    title: 'Configuration',
+    title: 'Administration',
+    roles: [UserRole.ADMIN],
     items: [
-      { label: 'Paramètres', href: '/parametres', icon: <IconSettings size={18} />, roles: [UserRole.ADMIN, UserRole.DIRECTEUR] },
+      { label: 'Utilisateurs', href: '/utilisateurs', icon: ShieldCheck },
+      { label: 'Parents', href: '/parents', icon: HeartHandshake },
+      { label: 'Rapports', href: '/rapports', icon: BarChart3 },
     ],
   },
 ];
 
-interface SidebarProps {
-  collapsed: boolean;
-  onToggle: () => void;
-}
-
-export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export function Sidebar() {
   const pathname = usePathname();
-  const user = useAuthStore((s) => s.user);
-  const userRole = user?.role as UserRole | undefined;
+  const router = useRouter();
+  const { user, logout } = useAuthStore();
+  const { sidebarCollapsed, toggleSidebar } = useAppStore();
 
-  const isAllowed = (item: NavItem) => {
-    if (!item.roles) return true;
-    if (!userRole) return false;
-    return item.roles.includes(userRole);
+  const role = user?.role as UserRole | undefined;
+
+  const visibleSections = NAV_SECTIONS.filter(
+    (section) => !section.roles || !role || section.roles.includes(role),
+  );
+
+  const handleLogout = () => {
+    logout();
+    router.push('/login');
   };
+
+  const initials = user ? user.email.charAt(0).toUpperCase() : 'U';
 
   return (
     <aside
-      className={[
-        'flex flex-col h-full transition-[width] duration-300 ease-in-out overflow-hidden',
-        'bg-[hsl(var(--sidebar-bg))] text-[hsl(var(--sidebar-text))]',
-        collapsed ? 'w-[60px]' : 'w-64',
-      ].join(' ')}
+      className={cn(
+        'fixed inset-y-0 left-0 z-50 flex flex-col transition-all duration-300',
+        sidebarCollapsed ? 'w-15' : 'w-65',
+      )}
+      style={{ background: 'hsl(var(--sidebar-bg))' }}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between h-16 px-3 border-b border-white/10 shrink-0">
-        {!collapsed && (
-          <div className="flex items-center gap-2 overflow-hidden">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[hsl(var(--primary))] shrink-0">
-              <IconSchool size={16} className="text-white" />
+      {/* Logo */}
+      <div className={cn(
+        'flex h-16 items-center border-b border-white/8 px-3',
+        sidebarCollapsed ? 'justify-center' : 'justify-between gap-2',
+      )}>
+        {!sidebarCollapsed && (
+          <Link href="/dashboard" className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-white font-black text-sm shadow-lg shadow-indigo-500/30">
+              EP
             </div>
-            <span className="font-semibold text-sm truncate text-white">École Primaire</span>
+            <div className="min-w-0">
+              <span className="block font-bold text-white text-sm leading-none">EcolePro</span>
+              <span className="block text-[10px] text-white/40 leading-none mt-0.5 truncate">Gestion scolaire</span>
+            </div>
+          </Link>
+        )}
+        {sidebarCollapsed && (
+          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-white font-black text-sm shadow-lg shadow-indigo-500/30">
+            EP
           </div>
         )}
-        {collapsed && (
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-[hsl(var(--primary))] mx-auto">
-            <IconSchool size={16} className="text-white" />
-          </div>
-        )}
-        <button
-          onClick={onToggle}
-          aria-label={collapsed ? 'Développer le menu' : 'Réduire le menu'}
-          className={[
-            'shrink-0 flex items-center justify-center w-7 h-7 rounded-md',
-            'hover:bg-white/10 transition-colors text-white/70 hover:text-white',
-            collapsed ? 'mx-auto' : '',
-          ].join(' ')}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleSidebar}
+          className={cn(
+            'h-7 w-7 shrink-0 rounded-lg text-white/40 hover:bg-white/8 hover:text-white/80',
+            sidebarCollapsed && 'absolute -right-3 top-14 h-6 w-6 rounded-full border border-white/10 bg-[hsl(var(--sidebar-bg))] shadow-md',
+          )}
         >
-          {collapsed ? <IconMenu2 size={16} /> : <IconChevronLeft size={16} />}
-        </button>
+          {sidebarCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+        </Button>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-4" aria-label="Navigation principale">
-        {navGroups.map((group) => {
-          const visibleItems = group.items.filter(isAllowed);
-          if (visibleItems.length === 0) return null;
-          return (
-            <div key={group.title}>
-              {!collapsed && (
-                <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-widest text-white/40">
-                  {group.title}
+      <ScrollArea className="flex-1 py-3">
+        <nav className="px-2 space-y-0.5">
+          {visibleSections.map((section) => (
+            <div key={section.title} className="mb-3">
+              {!sidebarCollapsed && (
+                <p className="mb-1 px-3 text-[10px] font-bold uppercase tracking-widest text-white/25 select-none">
+                  {section.title}
                 </p>
               )}
-              <ul className="space-y-0.5" role="list">
-                {visibleItems.map((item) => {
-                  const isActive = pathname === item.href || (item.href !== '/dashboard' && item.href !== '/' && pathname.startsWith(item.href));
+              {sidebarCollapsed && <div className="my-2 border-t border-white/8" />}
+              {section.items.map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const NavLink = (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      'group flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150',
+                      isActive
+                        ? 'bg-white/12 text-white shadow-sm'
+                        : 'text-white/55 hover:bg-white/6 hover:text-white/85',
+                      sidebarCollapsed && 'justify-center px-2',
+                    )}
+                  >
+                    {isActive && !sidebarCollapsed && (
+                      <span className="absolute left-2 h-4 w-0.5 rounded-full bg-primary" />
+                    )}
+                    <item.icon className={cn(
+                      'h-4 w-4 shrink-0 transition-colors',
+                      isActive ? 'text-primary' : 'text-white/40 group-hover:text-white/65',
+                    )} />
+                    {!sidebarCollapsed && (
+                      <>
+                        <span className="flex-1">{item.label}</span>
+                        {item.badge}
+                      </>
+                    )}
+                  </Link>
+                );
+
+                if (sidebarCollapsed) {
                   return (
-                    <li key={item.href}>
-                      <Link
-                        href={item.href}
-                        aria-current={isActive ? 'page' : undefined}
-                        title={collapsed ? item.label : undefined}
-                        className={[
-                          'flex items-center gap-3 rounded-lg px-2 py-2 text-sm font-medium transition-colors',
-                          isActive
-                            ? 'bg-[hsl(var(--primary))] text-white'
-                            : 'text-white/70 hover:bg-white/10 hover:text-white',
-                          collapsed ? 'justify-center' : '',
-                        ].join(' ')}
-                      >
-                        <span className="shrink-0">{item.icon}</span>
-                        {!collapsed && <span className="truncate">{item.label}</span>}
-                      </Link>
-                    </li>
+                    <Tooltip key={item.href}>
+                      <TooltipTrigger render={NavLink} />
+                      <TooltipContent side="right" className="text-xs">{item.label}</TooltipContent>
+                    </Tooltip>
                   );
-                })}
-              </ul>
+                }
+
+                return <div key={item.href} className="relative">{NavLink}</div>;
+              })}
             </div>
-          );
-        })}
-      </nav>
+          ))}
+        </nav>
+      </ScrollArea>
+
+      {/* Footer */}
+      <div className="border-t border-white/8 p-3">
+        <div className={cn('flex items-center gap-2.5', sidebarCollapsed && 'flex-col gap-2')}>
+          <Avatar className="h-8 w-8 shrink-0 ring-2 ring-white/10">
+            <AvatarFallback className="bg-linear-to-br from-indigo-500 to-violet-600 text-white text-xs font-bold">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          {!sidebarCollapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-white/80">{user?.email}</p>
+              <span className="mt-0.5 inline-flex items-center rounded-md border border-white/15 px-1.5 py-0 text-[10px] font-medium text-white/45">
+                {role}
+              </span>
+            </div>
+          )}
+          <Tooltip>
+            <TooltipTrigger render={
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleLogout}
+                className="h-7 w-7 shrink-0 rounded-lg text-white/40 hover:bg-rose-500/15 hover:text-rose-400"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </Button>
+            } />
+            <TooltipContent side={sidebarCollapsed ? 'right' : 'top'} className="text-xs">Déconnexion</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
     </aside>
   );
 }
